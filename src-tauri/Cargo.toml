@@ -43,6 +43,9 @@ tauri-plugin-dialog = "2.8.4"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "blocking", "query"] }
 tauri-plugin-global-shortcut = "2.4.1"
 tauri-plugin-single-instance = "2.5.5"
+sha2 = "0.11"
+hmac = "0.13.0"
+md-5 = "0.11.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
