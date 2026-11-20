@@ -642,8 +642,8 @@ mod tests {
                 isrc: None,
                 year: Some(1993),
                 genre: Some("alternative".into()),
-                artist_id: Some("41075".into()),
-                album_id: Some("5568718".into()),
+                artist_id: Some("36825".into()),
+                album_id: Some("3389005".into()),
             }
         );
 

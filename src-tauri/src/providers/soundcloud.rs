@@ -744,7 +744,7 @@ mod tests {
                 isrc: Some("GBSMU1355464".into()),
                 year: Some(2013),
                 genre: Some("Disco Electronic".into()),
-                artist_id: Some("1".into()),
+                artist_id: None,
                 album_id: None,
             }
         );
