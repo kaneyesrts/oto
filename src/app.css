@@ -1,0 +1,311 @@
+@import "@fontsource-variable/onest";
+@import "@fontsource-variable/unbounded";
+@import "@fontsource-variable/manrope";
+@import "@fontsource-variable/golos-text";
+@import "@fontsource-variable/playfair-display";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+/* ------------------------------------------------------------------ tokens */
+
+:root {
+  --font-ui: "Onest Variable", system-ui, sans-serif;
+  --font-display: "Unbounded Variable", var(--font-ui);
+  --font-num: "Onest Variable", var(--font-ui);
+  --font-lyrics: var(--font-ui);
+
+  --accent-default: 255 112 61;
+  --accent: rgb(var(--accent-rgb, var(--accent-default)));
+  --accent-soft: rgb(var(--accent-rgb, var(--accent-default)) / 0.16);
+  --on-accent: #fff;
+
+  --amb-0-def: 40 40 48;
+  --amb-1-def: 70 50 60;
+  --amb-2-def: 30 30 36;
+
+  --radius-xl: 22px;
+  --radius-lg: 16px;
+  --radius: 12px;
+  --radius-sm: 8px;
+
+  --sidebar-w: 236px;
+  --aside-w: 308px;
+  --bar-h: 88px;
+  --title-h: 46px;
+  --gap: 0px;
+
+  --ease-spring: cubic-bezier(0.22, 1.25, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  color-scheme: dark;
+}
+
+/* Noir: dense, dark, warm accent. Reference: Melo. */
+:root[data-theme="noir"] {
+  --bg: #0c0c0e;
+  --bg-2: #111114;
+  --surface: #17171b;
+  --surface-2: #1e1e23;
+  --hover: rgb(255 255 255 / 0.045);
+  --line: rgb(255 255 255 / 0.06);
+  --text: #f1f1f3;
+  --text-2: #9b9ba5;
+  --text-3: #5d5d66;
+  --panel-bg: var(--bg-2);
+  --panel-border: 1px solid var(--line);
+  --panel-blur: none;
+}
+
+/* Mist: soft pink haze, frosted cards floating over a landscape. Reference: the Figma login. */
+:root[data-theme="mist"] {
+  color-scheme: light;
+  --font-ui: "Manrope Variable", system-ui, sans-serif;
+  --font-display: "Manrope Variable", system-ui, sans-serif;
+  --font-num: "Manrope Variable", system-ui, sans-serif;
+  --accent-default: 214 74 128;
+  --bg: #f3c9d6;
+  --bg-2: rgb(255 255 255 / 0.32);
+  --surface: rgb(255 255 255 / 0.5);
+  --surface-2: rgb(255 255 255 / 0.7);
+  --hover: rgb(255 255 255 / 0.35);
+  --line: rgb(255 255 255 / 0.55);
+  --text: #2b1820;
+  --text-2: #7a5463;
+  --text-3: #b08a98;
+  --panel-bg: rgb(255 255 255 / 0.3);
+  --panel-border: 1px solid rgb(255 255 255 / 0.6);
+  --panel-blur: blur(28px) saturate(1.4);
+  --gap: 14px;
+  --radius-xl: 30px;
+  --radius-lg: 22px;
+  --title-h: 52px;
+  --amb-0-def: 236 140 170;
+  --amb-1-def: 200 110 150;
+  --amb-2-def: 250 210 222;
+}
+
+/* Liquid: refractive glass capsules over a living, cover-tinted backdrop. */
+:root[data-theme="liquid"] {
+  --font-ui: "Golos Text Variable", system-ui, sans-serif;
+  --font-display: "Golos Text Variable", system-ui, sans-serif;
+  --font-num: "Golos Text Variable", system-ui, sans-serif;
+  --accent-default: 120 190 255;
+  --bg: #07080c;
+  --bg-2: rgb(255 255 255 / 0.06);
+  --surface: rgb(255 255 255 / 0.08);
+  --surface-2: rgb(255 255 255 / 0.14);
+  --hover: rgb(255 255 255 / 0.08);
+  --line: rgb(255 255 255 / 0.12);
+  --text: #ffffff;
+  --text-2: rgb(255 255 255 / 0.66);
+  --text-3: rgb(255 255 255 / 0.38);
+  --panel-bg: rgb(255 255 255 / 0.05);
+  --panel-border: none;
+  --panel-blur: none;
+  --gap: 14px;
+  --radius-xl: 32px;
+  --radius-lg: 24px;
+  --title-h: 52px;
+  --bar-h: 92px;
+}
+
+/* Paper: Swiss editorial. Ink on paper, rules instead of boxes, type does the work. */
+:root[data-theme="paper"] {
+  color-scheme: light;
+  --font-ui: "Onest Variable", system-ui, sans-serif;
+  --font-display: "Playfair Display Variable", Georgia, serif;
+  --font-num: "IBM Plex Mono", ui-monospace, monospace;
+  --font-lyrics: "Playfair Display Variable", Georgia, serif;
+  --accent-default: 222 52 32;
+  --bg: #f2efe8;
+  --bg-2: #f2efe8;
+  --surface: #f8f6f1;
+  --surface-2: #ebe7de;
+  --hover: rgb(0 0 0 / 0.04);
+  --line: rgb(17 17 17 / 0.9);
+  --text: #111111;
+  --text-2: #55524c;
+  --text-3: #8f8a80;
+  --panel-bg: transparent;
+  --panel-border: none;
+  --panel-blur: none;
+  --radius-xl: 0px;
+  --radius-lg: 0px;
+  --radius: 0px;
+  --radius-sm: 0px;
+  --aside-w: 0px;
+  --sidebar-w: 220px;
+  --amb-0-def: 230 225 215;
+  --amb-1-def: 210 205 195;
+  --amb-2-def: 240 238 232;
+}
+
+/* ------------------------------------------------------------------ base */
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  font-feature-settings: "ss01", "cv11";
+}
+#app { height: 100%; }
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+input { font: inherit; color: inherit; }
+img { display: block; }
+::selection { background: var(--accent-soft); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+*:hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--text) 18%, transparent); }
+::-webkit-scrollbar-track { background: transparent; }
+
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.muted { color: var(--text-2); }
+.faint { color: var(--text-3); }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  color: var(--text-2);
+  transition: color 0.15s, background 0.15s, transform 0.2s var(--ease-spring);
+}
+.icon-btn:hover { color: var(--text); background: var(--hover); }
+.icon-btn:active { transform: scale(0.92); }
+.icon-btn.on { color: var(--accent); }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-weight: 600;
+  transition: transform 0.2s var(--ease-spring), background 0.15s, box-shadow 0.2s;
+}
+.pill:active { transform: scale(0.96); }
+.pill.solid { background: var(--accent); color: var(--on-accent); }
+.pill.solid:hover { box-shadow: 0 8px 24px -8px var(--accent); }
+.pill.ghost { border: 1px solid color-mix(in srgb, var(--text) 16%, transparent); }
+.pill.ghost:hover { background: var(--hover); }
+:root[data-theme="paper"] .pill { border-radius: 0; text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; }
+:root[data-theme="paper"] .pill.ghost { border: 1px solid var(--text); }
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 600;
+}
+:root[data-theme="paper"] .eyebrow { font-family: var(--font-num); color: var(--text); letter-spacing: 0.06em; font-weight: 500; }
+
+.cover {
+  background: linear-gradient(135deg, rgb(var(--amb-0, var(--amb-0-def))), rgb(var(--amb-1, var(--amb-1-def))));
+  object-fit: cover;
+  aspect-ratio: 1;
+}
+
+/* Panels: the visual difference between themes lives mostly here. */
+.panel {
+  background: var(--panel-bg);
+  border: var(--panel-border);
+  backdrop-filter: var(--panel-blur);
+  border-radius: var(--radius-xl);
+}
+:root[data-theme="noir"] .panel { border-radius: 0; border-width: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+:root[data-motion="reduced"] * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+
+/* ------------------------------------------------------------------ liquid glass rim
+   The refraction itself comes from the SVG filter in glass.ts; this adds the specular
+   edge light and inner depth that sell it as a physical slab. */
+.liquid-glass {
+  position: relative;
+  isolation: isolate;
+  background: rgb(255 255 255 / 0.04) !important;
+  border-radius: var(--lg-radius, 28px) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    inset 0 -1px 0 rgb(255 255 255 / 0.08),
+    inset 0 0 0 1px rgb(255 255 255 / 0.1),
+    inset 0 0 24px rgb(255 255 255 / 0.05),
+    0 18px 50px -20px rgb(0 0 0 / 0.55) !important;
+}
+.liquid-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    radial-gradient(120% 60% at 20% 0%, rgb(255 255 255 / 0.14), transparent 55%),
+    radial-gradient(80% 50% at 100% 100%, rgb(255 255 255 / 0.06), transparent 60%);
+}
+
+/* ------------------------------------------------------------------ Aura
+   The whole app lives on the same living, cover-tinted field as the lyrics view.
+   Surfaces are barely-there tints so the colour of the current song carries the room. */
+:root[data-theme="aura"] {
+  --font-ui: "Onest Variable", system-ui, sans-serif;
+  --font-display: "Onest Variable", system-ui, sans-serif;
+  --font-num: "Onest Variable", system-ui, sans-serif;
+  --accent-default: 255 196 160;
+  --bg: #0b0b0e;
+  --bg-2: rgb(0 0 0 / 0.16);
+  --surface: rgb(255 255 255 / 0.07);
+  --surface-2: rgb(255 255 255 / 0.13);
+  --hover: rgb(255 255 255 / 0.075);
+  --line: rgb(255 255 255 / 0.09);
+  --text: #ffffff;
+  --text-2: rgb(255 255 255 / 0.66);
+  --text-3: rgb(255 255 255 / 0.4);
+  --panel-bg: transparent;
+  --panel-border: none;
+  --panel-blur: none;
+  --radius-xl: 26px;
+  --radius-lg: 20px;
+  --gap: 10px;
+  --title-h: 50px;
+  --bar-h: 96px;
+  --sidebar-w: 224px;
+  --aside-w: 300px;
+}
+:root[data-theme="aura"] h1,
+:root[data-theme="aura"] .big,
+:root[data-theme="aura"] .ti { font-weight: 800 !important; letter-spacing: -0.035em !important; }
+:root[data-theme="aura"] .pill.solid { background: #fff; color: #0b0b0e; }
+:root[data-theme="aura"] .pill.solid:hover { box-shadow: 0 10px 30px -10px rgb(255 255 255 / 0.5); }
+:root[data-theme="aura"] .eyebrow { color: rgb(255 255 255 / 0.5); }
+
+/* Noir picks up the song too: a soft wash of the cover colour from the top of the page. */
+:root[data-theme="noir"] main.content {
+  background:
+    radial-gradient(90% 55% at 30% -12%, rgb(var(--amb-0, var(--amb-0-def)) / 0.32), transparent 70%),
+    radial-gradient(60% 40% at 90% -5%, rgb(var(--amb-1, var(--amb-1-def)) / 0.2), transparent 70%),
+    var(--bg) !important;
+  transition: background 1s;
+}
