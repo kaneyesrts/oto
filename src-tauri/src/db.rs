@@ -36,6 +36,11 @@ pub struct Track {
     /// A better copy of this recording exists; lists show that one instead.
     #[serde(default)]
     pub hidden: bool,
+    /// "<source>:<id>" of the artist / album at a streaming service, when known.
+    #[serde(default)]
+    pub artist_ref: String,
+    #[serde(default)]
+    pub album_ref: String,
 }
 
 fn yes() -> bool {
@@ -138,6 +143,8 @@ impl Db {
             ("remote_id", "TEXT NOT NULL DEFAULT ''"),
             ("saved", "INTEGER NOT NULL DEFAULT 1"),
             ("match_key", "TEXT NOT NULL DEFAULT ''"),
+            ("artist_ref", "TEXT NOT NULL DEFAULT ''"),
+            ("album_ref", "TEXT NOT NULL DEFAULT ''"),
         ] {
             let has: bool = conn
                 .prepare("SELECT 1 FROM pragma_table_info('tracks') WHERE name = ?")?
@@ -146,7 +153,13 @@ impl Db {
                 conn.execute_batch(&format!("ALTER TABLE tracks ADD COLUMN {col} {def}"))?;
             }
         }
-        conn.execute_batch("CREATE INDEX IF NOT EXISTS tracks_match ON tracks(match_key);")?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS tracks_match ON tracks(match_key);
+             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS artist_cache (
+                 name TEXT PRIMARY KEY, image TEXT, artist_ref TEXT NOT NULL DEFAULT '', fetched_at INTEGER NOT NULL
+             );",
+        )?;
         let db = Db(Mutex::new(conn));
         db.backfill_match_keys();
         Ok(db)
@@ -171,11 +184,11 @@ impl Db {
         {
             let mut st = tx
                 .prepare(
-                    "INSERT INTO tracks (id, path, title, artist, album, album_artist, duration_ms, track_no, year, genre, cover, palette, mtime, added_at, source, remote_id, saved, match_key, liked)
-                     VALUES (?1, ?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?10, 0, ?11, ?12, ?13, ?14, ?15, ?16)
+                    "INSERT INTO tracks (id, path, title, artist, album, album_artist, duration_ms, track_no, year, genre, cover, palette, mtime, added_at, source, remote_id, saved, match_key, liked, artist_ref, album_ref)
+                     VALUES (?1, ?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?10, 0, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
                      ON CONFLICT(id) DO UPDATE SET title=?2, artist=?3, album=?4, album_artist=?5, duration_ms=?6, year=?7, genre=?8,
                        cover=COALESCE(?9, cover), palette=CASE WHEN ?9 IS NULL THEN palette ELSE ?10 END,
-                       saved=MAX(saved, ?14), liked=MAX(liked, ?16), match_key=?15",
+                       saved=MAX(saved, ?14), liked=MAX(liked, ?16), match_key=?15, artist_ref=?17, album_ref=?18",
                 )
                 .unwrap();
             for t in items {
@@ -196,10 +209,39 @@ impl Db {
                     t.saved as i32,
                     match_key(&t.artist, &t.title),
                     t.liked as i32,
+                    t.artist_ref,
+                    t.album_ref,
                 ]);
             }
         }
         let _ = tx.commit();
+    }
+
+    pub fn meta(&self, key: &str) -> Option<String> {
+        let c = self.0.lock();
+        c.query_row("SELECT value FROM meta WHERE key = ?", [key], |r| r.get(0)).optional().ok().flatten()
+    }
+
+    pub fn set_meta(&self, key: &str, value: &str) {
+        let c = self.0.lock();
+        let _ = c.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", params![key, value]);
+    }
+
+    /// (image path, artist ref) for an artist name, if looked up before.
+    pub fn artist_cached(&self, name: &str) -> Option<(Option<String>, String, i64)> {
+        let c = self.0.lock();
+        c.query_row("SELECT image, artist_ref, fetched_at FROM artist_cache WHERE name = ?", [name], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    pub fn cache_artist(&self, name: &str, image: Option<&str>, artist_ref: &str) {
+        let c = self.0.lock();
+        let _ = c.execute(
+            "INSERT OR REPLACE INTO artist_cache (name, image, artist_ref, fetched_at) VALUES (?, ?, ?, ?)",
+            params![name, image, artist_ref, now_ms()],
+        );
     }
 
     pub fn set_saved(&self, id: &str, saved: bool) {
@@ -487,5 +529,7 @@ fn row_to_track(r: &Row) -> rusqlite::Result<Track> {
         saved: r.get::<_, i64>("saved")? != 0,
         alts: vec![],
         hidden: false,
+        artist_ref: r.get("artist_ref")?,
+        album_ref: r.get("album_ref")?,
     })
 }

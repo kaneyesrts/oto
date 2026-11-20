@@ -343,6 +343,11 @@ pub fn run() {
             sources::source_store,
             sources::source_import_liked,
             sources::track_set_saved,
+            sources::search_all,
+            sources::artist_page,
+            sources::album_page,
+            sources::artist_ref,
+            sources::artist_images,
         ])
         .build(tauri::generate_context!())
         .expect("error while building oto")

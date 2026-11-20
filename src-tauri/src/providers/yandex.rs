@@ -23,7 +23,7 @@ use reqwest::blocking::{Client, RequestBuilder};
 use serde_json::Value;
 use sha2::Sha256;
 
-use super::{Provider, RemoteTrack, StreamSource};
+use super::{AlbumPage, ArtistPage, Provider, RemoteAlbum, RemoteArtist, RemoteTrack, StreamSource};
 
 /// Implicit-grant login for the official Yandex Music client. After login Yandex redirects to
 /// `https://music.yandex.ru/#access_token=...`; feed that URL to [`token_from_redirect`].
@@ -286,6 +286,35 @@ impl Provider for Yandex {
         }
     }
 
+    fn search_artists(&self, query: &str, limit: usize) -> anyhow::Result<Vec<RemoteArtist>> {
+        let rb = self.get("/search").query(&[("text", query.trim()), ("type", "artist"), ("page", "0"), ("nocorrect", "false")]);
+        let r = self.send(rb)?;
+        let mut v: Vec<RemoteArtist> = r["artists"]["results"].as_array().into_iter().flatten().filter_map(map_artist).collect();
+        v.truncate(limit);
+        Ok(v)
+    }
+
+    fn artist(&self, remote_id: &str) -> anyhow::Result<ArtistPage> {
+        let r = self.send(self.get(&format!("/artists/{remote_id}/brief-info")))?;
+        let artist = map_artist(&r["artist"]).ok_or_else(|| anyhow!("Yandex: artist not found"))?;
+        let description = r["artist"]["description"]["text"].as_str().map(String::from).filter(|d| !d.trim().is_empty());
+        let top_tracks = r["popularTracks"].as_array().into_iter().flatten().filter_map(map_track).collect();
+        let mut albums: Vec<RemoteAlbum> = r["albums"].as_array().into_iter().flatten().filter_map(map_album).collect();
+        albums.extend(r["alsoAlbums"].as_array().into_iter().flatten().filter_map(map_album).map(|mut a| {
+            a.kind = Some("compilation".into());
+            a
+        }));
+        let similar = r["similarArtists"].as_array().into_iter().flatten().filter_map(map_artist).collect();
+        Ok(ArtistPage { artist, description, top_tracks, albums, similar })
+    }
+
+    fn album(&self, remote_id: &str) -> anyhow::Result<AlbumPage> {
+        let r = self.send(self.get(&format!("/albums/{remote_id}/with-tracks")))?;
+        let album = map_album(&r).ok_or_else(|| anyhow!("Yandex: album not found"))?;
+        let tracks = r["volumes"].as_array().into_iter().flatten().flat_map(|v| v.as_array().into_iter().flatten()).filter_map(map_track).collect();
+        Ok(AlbumPage { album, tracks })
+    }
+
     fn lyrics(&self, remote_id: &str) -> anyhow::Result<Option<String>> {
         // User-uploaded tracks have non-numeric ids and never have lyrics.
         let Some(track_id) = track_number(remote_id) else { return Ok(None) };
@@ -476,6 +505,32 @@ fn map_track(t: &Value) -> Option<RemoteTrack> {
         isrc: t["isrc"].as_str().map(str::to_string),
         year: album["year"].as_u64().and_then(|y| u32::try_from(y).ok()).filter(|y| *y > 0),
         genre: album["genre"].as_str().filter(|g| !g.is_empty()).map(str::to_string),
+        artist_id: id_string(&t["artists"][0]["id"]),
+        album_id: id_string(&album["id"]),
+    })
+}
+
+fn map_artist(a: &Value) -> Option<RemoteArtist> {
+    Some(RemoteArtist {
+        source: "yandex".into(),
+        remote_id: id_string(&a["id"])?,
+        name: a["name"].as_str()?.to_string(),
+        image_url: a["cover"]["uri"].as_str().or(a["ogImage"].as_str()).and_then(cover_url),
+        genres: a["genres"].as_array().map(|g| g.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
+        followers: a["likesCount"].as_u64(),
+    })
+}
+
+fn map_album(a: &Value) -> Option<RemoteAlbum> {
+    Some(RemoteAlbum {
+        source: "yandex".into(),
+        remote_id: id_string(&a["id"])?,
+        title: a["title"].as_str()?.to_string(),
+        artist: a["artists"].as_array().map(|x| x.iter().filter_map(|v| v["name"].as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
+        year: a["year"].as_u64().map(|y| y as u32).filter(|y| *y > 0),
+        cover_url: a["coverUri"].as_str().and_then(cover_url),
+        track_count: a["trackCount"].as_u64().map(|n| n as u32),
+        kind: a["type"].as_str().map(String::from).or(Some("album".into())),
     })
 }
 
@@ -587,6 +642,8 @@ mod tests {
                 isrc: None,
                 year: Some(1993),
                 genre: Some("alternative".into()),
+                artist_id: Some("41075".into()),
+                album_id: Some("5568718".into()),
             }
         );
 

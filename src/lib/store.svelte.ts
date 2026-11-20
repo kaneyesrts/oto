@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, type LyricsDoc, type PlayerState, type Playlist, type Settings, type SourceStatus, type SpectrumFrame, type Track } from "./api";
 import { applyPalette } from "./color";
 
-export type View = "home" | "library" | "albums" | "artists" | "liked" | "stats" | "settings" | "playlist";
+export type View = "home" | "library" | "albums" | "artists" | "liked" | "stats" | "settings" | "playlist" | "artist" | "remote-album";
 
 const emptyPlayer: PlayerState = {
   track: null, playing: false, posMs: 0, durationMs: 0, volume: 0.8,
@@ -17,6 +17,8 @@ export const app = $state({
   player: emptyPlayer as PlayerState,
   view: "home" as View,
   search: "",
+  /** Search tab: "all" (everything), "library", or a source id. */
+  searchWhere: "all",
   lyricsOpen: false,
   queueOpen: false,
   scan: null as null | { done: number; total: number; finished: boolean },
@@ -24,7 +26,13 @@ export const app = $state({
   lyricsLoading: false,
   toast: null as null | { text: string; at: number },
   /** Album or artist opened from a grid. */
-  focus: null as null | { kind: "album" | "artist" | "playlist"; key: string },
+  focus: null as null | { kind: "album" | "artist" | "playlist" | "remote-artist" | "remote-album"; key: string; name?: string },
+  /** Track shown in the "about this track" card. */
+  info: null as Track | null,
+  /** Library artist name → cached photo path. */
+  artistImages: {} as Record<string, string>,
+  /** Navigation history for the back button. */
+  history: [] as { view: View; focus: any }[],
   playlists: [] as Playlist[],
   sources: [] as SourceStatus[],
   /** Context menu for one or more tracks, opened by right click or the ⋯ button. */
@@ -95,6 +103,37 @@ export async function loadLyrics(force = false) {
   }
 }
 
+/** Opens an artist page. `ref` is "<source>:<id>" when known; otherwise the name is looked up. */
+export function openArtist(name: string, ref?: string) {
+  go("artist", { kind: "remote-artist", key: ref ?? "", name });
+}
+
+export function openRemoteAlbum(ref: string, name?: string) {
+  go("remote-album", { kind: "remote-album", key: ref, name });
+}
+
+export function go(view: View, focus: typeof app.focus = null) {
+  app.history = [...app.history.slice(-30), { view: app.view, focus: app.focus }];
+  app.view = view;
+  app.focus = focus;
+}
+
+export function back() {
+  const h = app.history.pop();
+  if (h) { app.view = h.view; app.focus = h.focus; }
+  else { app.view = "home"; app.focus = null; }
+}
+
+let imgPending = new Set<string>();
+/** Asks for photos of these artists; results arrive into app.artistImages. */
+export async function wantArtistImages(names: string[]) {
+  const ask = names.filter((n) => n && !(n in app.artistImages) && !imgPending.has(n));
+  if (!ask.length) return;
+  ask.forEach((n) => imgPending.add(n));
+  const have = await api.artistImages(ask);
+  app.artistImages = { ...app.artistImages, ...have };
+}
+
 /** Library rows: saved, and only the best copy of each recording. */
 export const libraryTracks = () => app.tracks.filter((t) => t.saved !== false && !t.hidden);
 
@@ -102,9 +141,10 @@ export async function refreshSources() {
   app.sources = await api.sources();
 }
 
-/** Plays tracks that may not be stored yet (search results): store them first. */
-export async function playRemote(tracks: Track[], start: number) {
-  const unknown = tracks.filter((t) => !trackIndex.has(t.id));
+/** Plays tracks that may not be stored yet (search results): store them first.
+ *  `extra` are other-service copies, stored so playback can fall back to them. */
+export async function playRemote(tracks: Track[], start: number, extra: Track[] = []) {
+  const unknown = [...tracks, ...extra].filter((t) => !trackIndex.has(t.id));
   if (unknown.length) {
     await api.sourceStore(unknown, false);
     for (const t of unknown) trackIndex.set(t.id, t);
@@ -207,6 +247,12 @@ export async function init(withLibrary: boolean) {
     await listen("oto://playlists", () => refreshPlaylists());
     await refreshPlaylists();
     await listen("oto://sources", () => refreshSources());
+    await listen<Record<string, string>>("oto://artist-images", (e) => {
+      app.artistImages = { ...app.artistImages, ...e.payload };
+    });
+    await listen<{ source: string; playlist: number; count: number }>("oto://imported", (e) => {
+      toast(`Импортировано ${e.payload.count}: порядок как в сервисе — в плейлисте «Мне нравится»`);
+    });
     refreshSources();
   }
   if (app.player.track) loadLyrics();

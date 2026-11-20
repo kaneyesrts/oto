@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, libraryTracks, player } from "../store.svelte";
+  import { app, libraryTracks, player, openArtist, wantArtistImages } from "../store.svelte";
   import { coverUrl, fmtDuration, plural } from "../api";
   import { albums, artists } from "../groups";
   import TrackList from "../components/TrackList.svelte";
@@ -12,6 +12,8 @@
   const album = $derived(app.focus?.kind === "album" ? all.find((a) => a.key === app.focus!.key) : null);
   const artist = $derived(app.focus?.kind === "artist" ? arts.find((a) => a.name === app.focus!.key) : null);
   const artistAlbums = $derived(artist ? all.filter((a) => a.artist === artist.name) : []);
+  $effect(() => { if (mode === "artists") wantArtistImages(arts.map((a) => a.name)); });
+  const photo = (name: string, fallback?: string | null) => app.artistImages[name] ? coverUrl(app.artistImages[name]) : coverUrl(fallback);
 
   function playShuffled(ids: string[]) {
     const s = [...ids];
@@ -28,7 +30,7 @@
       <div class="dm">
         <div class="eyebrow">Альбом{album.year ? ` · ${album.year}` : ""}</div>
         <h1>{album.title}</h1>
-        <button class="artist" onclick={() => (app.focus = { kind: "artist", key: album.artist })}>{album.artist}</button>
+        <button class="artist" onclick={() => openArtist(album.artist)}>{album.artist}</button>
         <div class="muted">{album.tracks.length} {plural(album.tracks.length, "трек", "трека", "треков")} · {fmtDuration(album.durationMs)}</div>
         <div class="acts">
           <button class="pill solid" onclick={() => player.playList(album.tracks.map((t) => t.id), 0)}><Play size={15} fill="currentColor" strokeWidth={0} /> Слушать</button>
@@ -82,8 +84,8 @@
         {/each}
       {:else}
         {#each arts as a (a.name)}
-          <button class="tile" onclick={() => (app.focus = { kind: "artist", key: a.name })}>
-            {#if coverUrl(a.cover)}<img class="cover round" src={coverUrl(a.cover)} alt="" loading="lazy" />{:else}<div class="cover round"></div>{/if}
+          <button class="tile" onclick={() => openArtist(a.name)}>
+            {#if photo(a.name, a.cover)}<img class="cover round" src={photo(a.name, a.cover)} alt="" loading="lazy" />{:else}<div class="cover round"></div>{/if}
             <span class="tn ellipsis">{a.name}</span>
             <span class="ta faint">{a.tracks.length} {plural(a.tracks.length, "трек", "трека", "треков")}</span>
           </button>

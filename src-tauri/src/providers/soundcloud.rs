@@ -22,7 +22,7 @@ use reqwest::header::{ACCEPT, AUTHORIZATION};
 use reqwest::{StatusCode, Url};
 use serde_json::Value;
 
-use super::{Provider, RemoteTrack, StreamSource};
+use super::{AlbumPage, ArtistPage, Provider, RemoteAlbum, RemoteArtist, RemoteTrack, StreamSource};
 
 const API: &str = "https://api-v2.soundcloud.com";
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
@@ -363,6 +363,46 @@ impl Provider for SoundCloud {
         })
     }
 
+    fn search_artists(&self, query: &str, limit: usize) -> anyhow::Result<Vec<RemoteArtist>> {
+        let l = limit.clamp(1, 50).to_string();
+        let v = self.api_get(&format!("{API}/search/users"), &[("q", query.trim()), ("limit", &l)])?;
+        Ok(collection(&v).iter().filter_map(map_user).collect())
+    }
+
+    fn artist(&self, remote_id: &str) -> anyhow::Result<ArtistPage> {
+        let u = self.api_get(&format!("{API}/users/{remote_id}"), &[])?;
+        let artist = map_user(&u).ok_or_else(|| anyhow::anyhow!("SoundCloud: user not found"))?;
+        let description = str_field(&u, "description").filter(|d| !d.trim().is_empty());
+        let top = self.api_get(&format!("{API}/users/{remote_id}/toptracks"), &[("limit", "20")])
+            .or_else(|_| self.api_get(&format!("{API}/users/{remote_id}/tracks"), &[("limit", "20")]))?;
+        let top_tracks = collection(&top).iter().filter_map(map_track).collect();
+        let albums = self
+            .api_get(&format!("{API}/users/{remote_id}/albums"), &[("limit", "30")])
+            .map(|v| collection(&v).iter().filter_map(map_playlist).collect())
+            .unwrap_or_default();
+        Ok(ArtistPage { artist, description, top_tracks, albums, similar: vec![] })
+    }
+
+    fn album(&self, remote_id: &str) -> anyhow::Result<AlbumPage> {
+        let p = self.api_get(&format!("{API}/playlists/{remote_id}"), &[])?;
+        let album = map_playlist(&p).ok_or_else(|| anyhow::anyhow!("SoundCloud: playlist not found"))?;
+        // Playlists list only the first few tracks in full; the rest are id stubs.
+        let items: Vec<&Value> = p.get("tracks").and_then(Value::as_array).into_iter().flatten().collect();
+        let mut tracks: Vec<RemoteTrack> = items.iter().filter_map(|t| map_track(t)).collect();
+        let stubs: Vec<String> = items
+            .iter()
+            .filter(|t| t.get("title").is_none())
+            .filter_map(|t| t.get("id").and_then(Value::as_u64).map(|i| i.to_string()))
+            .collect();
+        for chunk in stubs.chunks(50) {
+            if let Ok(v) = self.api_get(&format!("{API}/tracks"), &[("ids", &chunk.join(","))]) {
+                let full: Vec<RemoteTrack> = v.as_array().into_iter().flatten().filter_map(map_track).collect();
+                tracks.extend(full);
+            }
+        }
+        Ok(AlbumPage { album, tracks })
+    }
+
     fn lyrics(&self, _remote_id: &str) -> anyhow::Result<Option<String>> {
         Ok(None)
     }
@@ -504,6 +544,32 @@ fn map_track(t: &Value) -> Option<RemoteTrack> {
         isrc,
         year,
         genre: str_field(t, "genre"),
+        artist_id: t.get("user").and_then(|u| u.get("id")).and_then(Value::as_u64).map(|i| i.to_string()),
+        album_id: None,
+    })
+}
+
+fn map_user(u: &Value) -> Option<RemoteArtist> {
+    Some(RemoteArtist {
+        source: "soundcloud".into(),
+        remote_id: u.get("id").and_then(Value::as_u64)?.to_string(),
+        name: str_field(u, "username")?,
+        image_url: str_field(u, "avatar_url").map(|a| hires_artwork(&a)),
+        genres: vec![],
+        followers: u.get("followers_count").and_then(Value::as_u64),
+    })
+}
+
+fn map_playlist(p: &Value) -> Option<RemoteAlbum> {
+    Some(RemoteAlbum {
+        source: "soundcloud".into(),
+        remote_id: p.get("id").and_then(Value::as_u64)?.to_string(),
+        title: str_field(p, "title")?,
+        artist: p.get("user").and_then(|u| str_field(u, "username")).unwrap_or_default(),
+        year: str_field(p, "release_date").and_then(|d| parse_year(&d)).or_else(|| str_field(p, "created_at").and_then(|d| parse_year(&d))),
+        cover_url: str_field(p, "artwork_url").map(|a| hires_artwork(&a)),
+        track_count: p.get("track_count").and_then(Value::as_u64).map(|n| n as u32),
+        kind: str_field(p, "set_type").filter(|s| !s.is_empty()).or(Some("album".into())),
     })
 }
 
@@ -678,6 +744,8 @@ mod tests {
                 isrc: Some("GBSMU1355464".into()),
                 year: Some(2013),
                 genre: Some("Disco Electronic".into()),
+                artist_id: Some("1".into()),
+                album_id: None,
             }
         );
     }

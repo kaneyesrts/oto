@@ -24,6 +24,54 @@ pub struct RemoteTrack {
     pub isrc: Option<String>,
     pub year: Option<u32>,
     pub genre: Option<String>,
+    /// The (first) artist's id at the service, for artist pages.
+    #[serde(default)]
+    pub artist_id: Option<String>,
+    #[serde(default)]
+    pub album_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteArtist {
+    pub source: String,
+    pub remote_id: String,
+    pub name: String,
+    pub image_url: Option<String>,
+    pub genres: Vec<String>,
+    /// Likes / followers, whatever the service counts.
+    pub followers: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteAlbum {
+    pub source: String,
+    pub remote_id: String,
+    pub title: String,
+    pub artist: String,
+    pub year: Option<u32>,
+    pub cover_url: Option<String>,
+    pub track_count: Option<u32>,
+    /// "album" | "single" | "compilation" …
+    pub kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistPage {
+    pub artist: RemoteArtist,
+    pub description: Option<String>,
+    pub top_tracks: Vec<RemoteTrack>,
+    pub albums: Vec<RemoteAlbum>,
+    pub similar: Vec<RemoteArtist>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumPage {
+    pub album: RemoteAlbum,
+    pub tracks: Vec<RemoteTrack>,
 }
 
 /// How to fetch the audio bytes of a track.
@@ -49,4 +97,13 @@ pub trait Provider: Send + Sync {
     fn stream(&self, remote_id: &str) -> anyhow::Result<StreamSource>;
     /// Lyrics as LRC (preferred, synced) or plain text. `Ok(None)` when the service has none.
     fn lyrics(&self, remote_id: &str) -> anyhow::Result<Option<String>>;
+    fn search_artists(&self, _query: &str, _limit: usize) -> anyhow::Result<Vec<RemoteArtist>> {
+        Ok(vec![])
+    }
+    fn artist(&self, _remote_id: &str) -> anyhow::Result<ArtistPage> {
+        anyhow::bail!("artist pages are not supported by this source")
+    }
+    fn album(&self, _remote_id: &str) -> anyhow::Result<AlbumPage> {
+        anyhow::bail!("album pages are not supported by this source")
+    }
 }

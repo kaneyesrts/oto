@@ -24,17 +24,17 @@ function cover(p: RGB[], seed: number) {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-const artists = ["Северный Ветер", "Lumen Drift", "Полынь", "Kite Season", "Неон и Пыль", "Marrow Lane"];
+const artists_ = ["Северный Ветер", "Lumen Drift", "Полынь", "Kite Season", "Неон и Пыль", "Marrow Lane"];
 const albumsByArtist = [["Тихий шторм", "Сигнал"], ["Afterglow"], ["Степь"], ["Paper Planes", "Weather"], ["Ночные смены"], ["Hollow Bright"]];
 const titles = ["Ниже облаков", "Fold", "Морская соль", "Последний трамвай", "Glass Hours", "Полдень", "Static Bloom", "Тише воды", "Northbound", "Огни", "Paper Moon", "Без названия", "Low Tide", "Перрон", "Ember", "Кислород", "Satellites", "Сны о юге", "Velvet Room", "Отражения", "Coastline", "Перелёт", "Wildflower", "Пятница"];
 
 const tracks: Track[] = titles.map((title, i) => {
-  const a = i % artists.length;
+  const a = i % artists_.length;
   const albs = albumsByArtist[a];
   const album = albs[i % albs.length];
   const pi = (a * 2 + albs.indexOf(album)) % palettes.length;
   return {
-    id: `t${i}`, path: `C:/Music/${title}.flac`, title, artist: artists[a], album, albumArtist: artists[a],
+    id: `t${i}`, path: `C:/Music/${title}.flac`, title, artist: artists_[a], album, albumArtist: artists_[a],
     durationMs: 150_000 + ((i * 37_123) % 140_000), trackNo: (i % 9) + 1, year: 2016 + (i % 9),
     genre: ["Инди", "Электроника", "Пост-рок", "Поп"][i % 4], cover: cover(palettes[pi], pi * 7 + albs.indexOf(album)),
     palette: palettes[pi], liked: i % 5 === 0, addedAt: Date.now() - i * 86400000, source: "local", saved: true,
@@ -99,7 +99,7 @@ export function installMock() {
         return {
           rangeMs: 41 * 3600000, todayMs: 74 * 60000, plays: 612, skips: 88, uniqueTracks: 214, streakDays: 12,
           topTracks: tracks.slice(0, 8).map((t, i) => ({ track: t, plays: 40 - i * 4, ms: (40 - i * 4) * t.durationMs })),
-          topArtists: artists.map((a, i) => ({ artist: a, plays: 120 - i * 15, ms: (9 - i) * 3600000, cover: tracks[i].cover })),
+          topArtists: artists_.map((a, i) => ({ artist: a, plays: 120 - i * 15, ms: (9 - i) * 3600000, cover: tracks[i].cover })),
           heat: Array.from({ length: 7 }, (_, d) => Array.from({ length: 24 }, (_, h) => Math.max(0, Math.sin((h - 7) / 3.5) * 1 + (h > 19 ? 1.4 : 0) + (d > 4 ? 0.5 : 0)) * 1800000 * Math.random())),
           daily: Array.from({ length: 30 }, (_, i) => ({ day: new Date(Date.now() - (29 - i) * 86400000).toISOString().slice(0, 10), ms: Math.random() * 3 * 3600000 })),
           rising: { artist: "Полынь", plays: 18, ms: 2.4 * 3600000, cover: tracks[2].cover },
@@ -110,6 +110,27 @@ export function installMock() {
       ];
       case "source_search": return tracks.slice(0, 8).map((t, i) => ({ ...t, id: `${args.id}:${100 + i}`, source: args.id, saved: i % 3 === 0 }));
       case "source_store": for (const t of args.tracks) if (!tracks.find((x) => x.id === t.id)) tracks.push({ ...t, saved: args.saved }); emit("oto://library", 0); return null;
+      case "search_all": {
+        const hits = tracks.slice(0, 10).map((t, i) => ({
+          track: { ...t, id: `yandex:${200 + i}`, source: "yandex", saved: false, artistRef: "yandex:1" },
+          others: i % 2 ? [{ ...t, id: `soundcloud:${300 + i}`, source: "soundcloud", saved: false }] : [],
+        }));
+        const artists = artists_.map((a, i) => ({ source: i % 3 ? "yandex" : "soundcloud", remoteId: String(i + 1), name: a, imageUrl: tracks[i].cover, genres: ["инди"], followers: 1000 * (i + 1) }));
+        return { tracks: hits, artists, errors: [] };
+      }
+      case "artist_ref": return "yandex:1";
+      case "artist_images": return {};
+      case "artist_page": return {
+        artist: { source: "yandex", remoteId: "1", name: "Северный Ветер", imageUrl: tracks[0].cover, genres: ["инди", "пост-рок"], followers: 48211 },
+        description: "Группа из Петербурга. Медленные гитары, длинные проигрыши и тексты о городе ночью.",
+        topTracks: tracks.slice(0, 10).map((t, i) => ({ ...t, id: `yandex:${400 + i}`, source: "yandex", saved: false })),
+        albums: albumsByArtist.flat().map((a, i) => ({ source: "yandex", remoteId: String(i), title: a, artist: "Северный Ветер", year: 2018 + i, coverUrl: tracks[i].cover, trackCount: 8 + i, kind: i % 3 === 2 ? "single" : "album" })),
+        similar: artists_.slice(1).map((a, i) => ({ source: "yandex", remoteId: String(i + 9), name: a, imageUrl: tracks[i + 3].cover, genres: [] })),
+      };
+      case "album_page": return {
+        album: { source: "yandex", remoteId: "1", title: "Тихий шторм", artist: "Северный Ветер", year: 2021, coverUrl: tracks[0].cover, trackCount: 9, kind: "album" },
+        tracks: tracks.slice(0, 9).map((t, i) => ({ ...t, id: `yandex:${500 + i}`, source: "yandex", saved: false })),
+      };
       case "playlists": return plMeta();
       case "playlist_tracks": return lists.find((l) => l.id === args.id)?.ids ?? [];
       case "playlist_create": { const id = Date.now(); lists.unshift({ id, name: args.name, ids: args.ids ?? [], updatedAt: Date.now() }); plChanged(); return id; }

@@ -46,3 +46,5 @@ export { default as Trash } from "@lucide/svelte/icons/trash";
 export { default as Pencil } from "@lucide/svelte/icons/pencil";
 export { default as ListX } from "@lucide/svelte/icons/list-x";
 export { default as Plus } from "@lucide/svelte/icons/plus";
+export { default as Info } from "@lucide/svelte/icons/info";
+export { default as ArrowLeft } from "@lucide/svelte/icons/arrow-left";

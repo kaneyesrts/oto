@@ -25,7 +25,41 @@ export interface Track {
   alts?: string[];
   /** A better copy exists; lists show that one. */
   hidden?: boolean;
+  /** "<source>:<id>" of the artist / album at a service. */
+  artistRef?: string;
+  albumRef?: string;
 }
+
+export interface RemoteArtist {
+  source: string;
+  remoteId: string;
+  name: string;
+  imageUrl?: string | null;
+  genres: string[];
+  followers?: number | null;
+}
+
+export interface RemoteAlbum {
+  source: string;
+  remoteId: string;
+  title: string;
+  artist: string;
+  year?: number | null;
+  coverUrl?: string | null;
+  trackCount?: number | null;
+  kind?: string | null;
+}
+
+export interface GlobalHit { track: Track; others: Track[] }
+export interface GlobalResults { tracks: GlobalHit[]; artists: RemoteArtist[]; errors: [string, string][] }
+export interface ArtistView {
+  artist: RemoteArtist;
+  description?: string | null;
+  topTracks: Track[];
+  albums: RemoteAlbum[];
+  similar: RemoteArtist[];
+}
+export interface AlbumView { album: RemoteAlbum; tracks: Track[] }
 
 export interface SourceStatus {
   id: string;
@@ -184,6 +218,11 @@ export const api = {
   sourceStore: (tracks: Track[], saved: boolean) => invoke("source_store", { tracks, saved }),
   sourceImportLiked: (id: string) => invoke("source_import_liked", { id }),
   trackSetSaved: (id: string, saved: boolean) => invoke("track_set_saved", { id, saved }),
+  searchAll: (query: string) => invoke<GlobalResults>("search_all", { query }),
+  artistPage: (reference: string) => invoke<ArtistView>("artist_page", { reference }),
+  albumPage: (reference: string) => invoke<AlbumView>("album_page", { reference }),
+  artistRef: (name: string) => invoke<string | null>("artist_ref", { name }),
+  artistImages: (names: string[]) => invoke<Record<string, string>>("artist_images", { names }),
   playlists: () => invoke<Playlist[]>("playlists"),
   playlistTracks: (id: number) => invoke<string[]>("playlist_tracks", { id }),
   playlistCreate: (name: string, ids?: string[]) => invoke<number>("playlist_create", { name, ids }),

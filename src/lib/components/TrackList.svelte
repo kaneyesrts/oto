@@ -1,6 +1,6 @@
 <script lang="ts">
   // Virtualised track table: only visible rows are in the DOM, so 20k-track libraries scroll smoothly.
-  import { app, player } from "../store.svelte";
+  import { app, player, openArtist } from "../store.svelte";
   import { coverUrl, fmtTime, SOURCE_LABEL, type Track } from "../api";
   import { Heart, Play, Ellipsis, Grip } from "../icons";
   import Spectrum from "./Spectrum.svelte";
@@ -115,7 +115,7 @@
           {/if}
           <span class="tt">
             <span class="name ellipsis">{t.title}</span>
-            <span class="by ellipsis">{#if t.source !== "local"}<i class="src s-{t.source}">{SOURCE_LABEL[t.source] ?? t.source}</i>{:else if t.alts?.length}<i class="src">+{t.alts.length}</i>{/if}{t.artist}</span>
+            <span class="by ellipsis">{#if t.source !== "local"}<i class="src s-{t.source}">{SOURCE_LABEL[t.source] ?? t.source}</i>{:else if t.alts?.length}<i class="src">+{t.alts.length}</i>{/if}<button class="alink" onclick={(e) => { e.stopPropagation(); openArtist((t.albumArtist || t.artist).split(",")[0].trim(), t.artistRef || undefined); }}>{t.artist}</button></span>
           </span>
         </span>
         {#if showAlbum}<span class="c-al ellipsis muted">{t.album}</span>{/if}
@@ -173,6 +173,8 @@
   .c-t .cover { width: 40px; height: 40px; border-radius: 7px; flex: none; }
   .tt { display: flex; flex-direction: column; min-width: 0; }
   .name { font-weight: 550; font-size: 13.5px; }
+  .alink { color: inherit; font: inherit; }
+  .alink:hover { color: var(--text); text-decoration: underline; }
   .src { font-style: normal; font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 5px; margin-right: 6px; border-radius: 4px; background: var(--surface-2); color: var(--text-2); vertical-align: 1px; }
   .s-yandex { background: rgb(255 204 0 / 0.18); color: #ffcc33; }
   .s-soundcloud { background: rgb(255 85 0 / 0.18); color: #ff7a33; }

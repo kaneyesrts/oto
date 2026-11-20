@@ -7,7 +7,7 @@
 //!   queue; `SpotifySource` drains that queue into our own engine, so EQ, the analyser,
 //!   stats and lyrics sync work exactly as for every other source.
 
-use super::{Provider, RemoteTrack, StreamSource};
+use super::{AlbumPage, ArtistPage, Provider, RemoteAlbum, RemoteArtist, RemoteTrack, StreamSource};
 use librespot_core::{authentication::Credentials, config::SessionConfig, session::Session, spotify_uri::SpotifyUri};
 use librespot_playback::{
     audio_backend::{Sink, SinkResult},
@@ -130,6 +130,32 @@ fn map_track(t: &Value) -> Option<RemoteTrack> {
         isrc: t["external_ids"]["isrc"].as_str().map(String::from),
         year: album["release_date"].as_str().and_then(|d| d.get(..4)).and_then(|y| y.parse().ok()),
         genre: None,
+        artist_id: t["artists"][0]["id"].as_str().map(String::from),
+        album_id: album["id"].as_str().map(String::from),
+    })
+}
+
+fn map_artist(a: &Value) -> Option<RemoteArtist> {
+    Some(RemoteArtist {
+        source: "spotify".into(),
+        remote_id: a["id"].as_str()?.to_string(),
+        name: a["name"].as_str()?.to_string(),
+        image_url: a["images"].as_array().and_then(|i| i.first()).and_then(|i| i["url"].as_str()).map(String::from),
+        genres: a["genres"].as_array().map(|g| g.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
+        followers: a["followers"]["total"].as_u64(),
+    })
+}
+
+fn map_album(a: &Value) -> Option<RemoteAlbum> {
+    Some(RemoteAlbum {
+        source: "spotify".into(),
+        remote_id: a["id"].as_str()?.to_string(),
+        title: a["name"].as_str()?.to_string(),
+        artist: a["artists"].as_array().map(|x| x.iter().filter_map(|v| v["name"].as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
+        year: a["release_date"].as_str().and_then(|d| d.get(..4)).and_then(|y| y.parse().ok()),
+        cover_url: a["images"].as_array().and_then(|i| i.first()).and_then(|i| i["url"].as_str()).map(String::from),
+        track_count: a["total_tracks"].as_u64().map(|n| n as u32),
+        kind: a["album_type"].as_str().map(String::from),
     })
 }
 
@@ -164,6 +190,43 @@ impl Provider for Spotify {
     fn stream(&self, remote_id: &str) -> anyhow::Result<StreamSource> {
         Ok(StreamSource::Spotify { uri: format!("spotify:track:{remote_id}") })
     }
+    fn search_artists(&self, query: &str, limit: usize) -> anyhow::Result<Vec<RemoteArtist>> {
+        let url = reqwest::Url::parse_with_params(&format!("{API}/search"), &[("q", query), ("type", "artist"), ("limit", &limit.clamp(1, 50).to_string())])?;
+        let v = self.get(url.as_str())?;
+        Ok(v["artists"]["items"].as_array().map(|a| a.iter().filter_map(map_artist).collect()).unwrap_or_default())
+    }
+
+    fn artist(&self, remote_id: &str) -> anyhow::Result<ArtistPage> {
+        let a = self.get(&format!("{API}/artists/{remote_id}"))?;
+        let artist = map_artist(&a).ok_or_else(|| anyhow::anyhow!("Spotify: artist not found"))?;
+        let top_tracks = self
+            .get(&format!("{API}/artists/{remote_id}/top-tracks"))
+            .map(|v| v["tracks"].as_array().map(|t| t.iter().filter_map(map_track).collect()).unwrap_or_default())
+            .unwrap_or_default();
+        let albums = self
+            .get(&format!("{API}/artists/{remote_id}/albums?include_groups=album,single&limit=50"))
+            .map(|v| v["items"].as_array().map(|t| t.iter().filter_map(map_album).collect()).unwrap_or_default())
+            .unwrap_or_default();
+        Ok(ArtistPage { artist, description: None, top_tracks, albums, similar: vec![] })
+    }
+
+    fn album(&self, remote_id: &str) -> anyhow::Result<AlbumPage> {
+        let a = self.get(&format!("{API}/albums/{remote_id}"))?;
+        let album = map_album(&a).ok_or_else(|| anyhow::anyhow!("Spotify: album not found"))?;
+        // Album track objects omit the album; give them this one so covers show.
+        let tracks = a["tracks"]["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|t| {
+                let mut t = t.clone();
+                t["album"] = a.clone();
+                map_track(&t)
+            })
+            .collect();
+        Ok(AlbumPage { album, tracks })
+    }
+
     fn lyrics(&self, _remote_id: &str) -> anyhow::Result<Option<String>> {
         // Spotify's lyrics come from a private endpoint; the cascade (LRCLIB, Yandex) covers it.
         Ok(None)

@@ -1,21 +1,33 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { app, libraryTracks, player } from "../store.svelte";
   import { fmtDuration, plural } from "../api";
   import { search } from "../groups";
   import TrackList from "../components/TrackList.svelte";
   import OnlineResults from "../components/OnlineResults.svelte";
+  import GlobalSearch from "../components/GlobalSearch.svelte";
+  import { SOURCE_LABEL } from "../api";
   import { Play, Shuffle } from "../icons";
 
   let { liked = false } = $props();
   type Sort = "artist" | "title" | "added" | "duration";
-  let sort = $state<Sort>("artist");
-  // Where to search: the library, or a streaming service.
-  let where = $state("library");
+  // Favourites keep the order you liked them in (the service's order for imports).
+  let sort = $state<Sort>(untrack(() => liked) ? "added" : "artist");
+  // Search tab: everything, the library, or one service.
+  const where = $derived(app.search ? app.searchWhere : "library");
   const online = $derived(app.sources.filter((s) => s.connected || s.worksAnonymously));
-  $effect(() => { if (!app.search) where = "library"; });
+  // Source filter for the track list.
+  let src = $state("all");
+  const counts = $derived.by(() => {
+    const m: Record<string, number> = {};
+    for (const t of libraryTracks()) m[t.source] = (m[t.source] ?? 0) + 1;
+    return m;
+  });
+  const srcOrder = ["local", "yandex", "spotify", "soundcloud"];
 
   const list = $derived.by(() => {
     let l = liked ? libraryTracks().filter((t) => t.liked) : libraryTracks();
+    if (src !== "all") l = l.filter((t) => t.source === src);
     l = search(l, app.search);
     if (sort === "title") l = [...l].sort((a, b) => a.title.localeCompare(b.title));
     else if (sort === "added") l = [...l].sort((a, b) => b.addedAt - a.addedAt);
@@ -41,8 +53,9 @@
     </div>
     {#if app.search && !liked}
       <div class="seg where">
-        <button class:on={where === "library"} onclick={() => (where = "library")}>Библиотека <em>{list.length}</em></button>
-        {#each online as src}<button class:on={where === src.id} onclick={() => (where = src.id)}>{src.name}</button>{/each}
+        <button class:on={where === "all"} onclick={() => (app.searchWhere = "all")}>Всё</button>
+        <button class:on={where === "library"} onclick={() => (app.searchWhere = "library")}>Библиотека <em>{list.length}</em></button>
+        {#each online as s}<button class:on={where === s.id} onclick={() => (app.searchWhere = s.id)}>{s.name}</button>{/each}
       </div>
     {/if}
     <div class="actions" class:hidden={where !== "library"}>
@@ -55,8 +68,18 @@
       <button class="pill solid" onclick={() => player.playList(list.map((t) => t.id), 0)} disabled={!list.length}><Play size={15} fill="currentColor" strokeWidth={0} /> Слушать</button>
     </div>
   </header>
+  {#if where === "library" && Object.keys(counts).length > 1}
+    <div class="srcbar">
+      <button class:on={src === "all"} onclick={() => (src = "all")}>Все <em>{Object.values(counts).reduce((a, b) => a + b, 0)}</em></button>
+      {#each srcOrder.filter((s) => counts[s]) as s}
+        <button class:on={src === s} onclick={() => (src = s)}><i class="dot d-{s}"></i>{s === "local" ? "Файлы" : SOURCE_LABEL[s]} <em>{counts[s]}</em></button>
+      {/each}
+    </div>
+  {/if}
   <div class="body">
-    {#if where !== "library"}
+    {#if where === "all"}
+      <GlobalSearch query={app.search} />
+    {:else if where !== "library"}
       <OnlineResults source={where} query={app.search} />
     {:else if list.length}
       <TrackList tracks={list} />
@@ -76,6 +99,14 @@
   .actions { display: flex; align-items: center; gap: 10px; }
   .actions.hidden { display: none; }
   .where em { font-style: normal; opacity: 0.5; margin-left: 4px; }
+  .srcbar { display: flex; gap: 6px; padding: 0 32px 12px; flex-wrap: wrap; }
+  .srcbar button { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; color: var(--text-2); background: var(--surface); }
+  .srcbar button:hover { color: var(--text); }
+  .srcbar button.on { background: var(--text); color: var(--bg); }
+  .srcbar em { font-style: normal; opacity: 0.55; }
+  :root[data-theme="paper"] .srcbar button { border-radius: 0; background: none; border: 1px solid var(--line); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+  .d-yandex { background: #ffcc33; } .d-soundcloud { background: #ff7a33; } .d-spotify { background: #3ee07a; } .d-local { background: var(--accent); }
   .seg { display: flex; padding: 3px; border-radius: 999px; background: var(--surface); }
   .seg button { height: 30px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; color: var(--text-2); }
   .seg button.on { background: var(--surface-2); color: var(--text); }

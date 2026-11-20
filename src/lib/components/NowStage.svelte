@@ -3,7 +3,7 @@
   // the lyric line sings in place, everything is one click from the full lyrics view.
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
-  import { app, frame, player, toggleFullscreen } from "../store.svelte";
+  import { app, frame, player, toggleFullscreen, openArtist } from "../store.svelte";
   import { coverUrl } from "../api";
   import { sourceLabel } from "../lyrics";
   import LiveLine from "./LiveLine.svelte";
@@ -42,7 +42,7 @@
     {#key t.id}
       <h1 class="title" in:fade={{ duration: 400 }}>{t.title}</h1>
     {/key}
-    <button class="artist" onclick={() => { app.view = "artists"; app.focus = { kind: "artist", key: t.albumArtist || t.artist }; }}>{t.artist}</button>
+    <button class="artist" onclick={() => openArtist((t.albumArtist || t.artist).split(",")[0].trim(), t.artistRef || undefined)}>{t.artist}</button>
 
     <button class="lyric" onclick={() => (app.lyricsOpen = true)}>
       {#if timed}

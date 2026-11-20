@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, player, trackById } from "../store.svelte";
+  import { app, player, trackById, openArtist } from "../store.svelte";
   import { api, coverUrl, fmtDuration, plural, type Stats } from "../api";
   import { glass } from "../glass";
 
@@ -86,7 +86,7 @@
               <li>
                 <span class="rk">{i + 1}</span>
                 {#if coverUrl(a.cover)}<img class="cover" src={coverUrl(a.cover)} alt="" />{:else}<span class="cover"></span>{/if}
-                <button class="an" onclick={() => { app.view = "artists"; app.focus = { kind: "artist", key: a.artist }; }}>
+                <button class="an" onclick={() => openArtist(a.artist)}>
                   <span class="ellipsis">{a.artist}</span>
                   <span class="faint">{fmtDuration(a.ms)} · {a.plays} {plural(a.plays, "раз", "раза", "раз")}</span>
                 </button>

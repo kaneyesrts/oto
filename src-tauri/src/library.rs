@@ -137,6 +137,8 @@ fn read_track(path: &Path, cover_dir: &Path) -> Option<Track> {
         saved: true,
         alts: vec![],
         hidden: false,
+        artist_ref: String::new(),
+        album_ref: String::new(),
     })
 }
 

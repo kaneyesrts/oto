@@ -2,7 +2,7 @@
 //! resolving a track to a playable stream, and lyrics lookups across services.
 
 use crate::db::{now_ms, Db, Track};
-use crate::providers::{soundcloud::SoundCloud, spotify::Spotify, yandex::Yandex, Provider, RemoteTrack, StreamSource};
+use crate::providers::{soundcloud::SoundCloud, spotify::Spotify, yandex::Yandex, AlbumPage, ArtistPage, Provider, RemoteAlbum, RemoteArtist, RemoteTrack, StreamSource};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -149,6 +149,8 @@ pub fn to_track(r: &RemoteTrack, saved: bool) -> Track {
         saved,
         alts: vec![],
         hidden: false,
+        artist_ref: r.artist_id.as_ref().map(|i| format!("{}:{i}", r.source)).unwrap_or_default(),
+        album_ref: r.album_id.as_ref().map(|i| format!("{}:{i}", r.source)).unwrap_or_default(),
     }
 }
 
@@ -399,7 +401,361 @@ pub fn source_import_liked(app: AppHandle, id: String) {
                 let _ = app.emit("oto://library", ());
             }
         }
+        // Mirror the service's own order exactly in a playlist that is refreshed on every import.
+        let ids: Vec<String> = liked.iter().map(|r| remote_id_of(&r.source, &r.remote_id)).collect();
+        let db = app.state::<Db>();
+        let key = format!("liked_playlist:{id}");
+        let existing = db.meta(&key).and_then(|v| v.parse::<i64>().ok()).filter(|pid| db.playlists().iter().any(|p| p.id == *pid));
+        let name = format!("Мне нравится · {}", source_name(&id));
+        let pid = existing.unwrap_or_else(|| {
+            let pid = db.playlist_create(&name);
+            db.set_meta(&key, &pid.to_string());
+            pid
+        });
+        db.playlist_set(pid, &ids);
+        let _ = app.emit("oto://playlists", pid);
         emit(total, total, true);
         let _ = app.emit("oto://library", ());
+        let _ = app.emit("oto://imported", serde_json::json!({ "source": id, "playlist": pid, "count": total }));
     });
+}
+
+pub fn source_name(id: &str) -> &'static str {
+    match id {
+        "yandex" => "Яндекс Музыка",
+        "soundcloud" => "SoundCloud",
+        "spotify" => "Spotify",
+        _ => "Сервис",
+    }
+}
+
+// ---------- global search, artists, albums ----------
+
+/// One song found on one or more services.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalHit {
+    /// The copy to play: from the best service the user can actually stream in full.
+    pub track: Track,
+    /// The same song on other services.
+    pub others: Vec<Track>,
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalResults {
+    pub tracks: Vec<GlobalHit>,
+    pub artists: Vec<RemoteArtist>,
+    /// Services that failed, with the error (so the UI can say "SoundCloud недоступен").
+    pub errors: Vec<(String, String)>,
+}
+
+/// Which services to query, best first. A service that would only give previews
+/// (Yandex without login) ranks after ones that stream full tracks.
+fn ranked_sources(s: &Sources) -> Vec<(&'static str, Arc<dyn Provider>)> {
+    let c = s.creds.read().clone();
+    let mut v: Vec<(u8, &'static str)> = vec![
+        (if c.yandex_token.is_some() { 0 } else { 3 }, "yandex"),
+        (1, "spotify"),
+        (2, "soundcloud"),
+    ];
+    if c.spotify_refresh.is_none() {
+        v.retain(|(_, id)| *id != "spotify");
+    }
+    v.sort();
+    v.into_iter().filter_map(|(_, id)| s.provider(id).map(|p| (id, p))).collect()
+}
+
+#[tauri::command]
+pub async fn search_all(app: AppHandle, query: String) -> GlobalResults {
+    tauri::async_runtime::spawn_blocking(move || {
+        let srcs = ranked_sources(&app.state::<Sources>());
+        let q = query.trim().to_string();
+        // All services in parallel; each returns tracks and artists.
+        let results: Vec<(&'static str, anyhow::Result<(Vec<RemoteTrack>, Vec<RemoteArtist>)>)> = std::thread::scope(|sc| {
+            let hs: Vec<_> = srcs
+                .iter()
+                .map(|(id, p)| {
+                    let q = q.clone();
+                    let p = p.clone();
+                    let id = *id;
+                    sc.spawn(move || (id, p.search(&q, 25).map(|t| (t, p.search_artists(&q, 8).unwrap_or_default()))))
+                })
+                .collect();
+            hs.into_iter().filter_map(|h| h.join().ok()).collect()
+        });
+        let mut out = GlobalResults::default();
+        let db = app.state::<Db>();
+        let order: Vec<&str> = srcs.iter().map(|(id, _)| *id).collect();
+        let mut per_source: Vec<(usize, Vec<Track>)> = vec![];
+        let mut artists: Vec<(usize, Vec<RemoteArtist>)> = vec![];
+        for (id, r) in results {
+            let rank = order.iter().position(|x| *x == id).unwrap_or(9);
+            match r {
+                Ok((tracks, arts)) => {
+                    let ts = tracks
+                        .iter()
+                        .map(|r| {
+                            let mut t = to_track(r, false);
+                            if let Some(k) = db.track(&t.id) {
+                                t.saved = k.saved;
+                                t.liked = k.liked;
+                                if k.cover.as_deref().is_some_and(|c| !c.starts_with("http")) {
+                                    t.cover = k.cover;
+                                    t.palette = k.palette;
+                                }
+                            }
+                            t
+                        })
+                        .collect();
+                    per_source.push((rank, ts));
+                    artists.push((rank, arts));
+                }
+                Err(e) => out.errors.push((id.to_string(), e.to_string())),
+            }
+        }
+        per_source.sort_by_key(|(r, _)| *r);
+        // Merge: walk services best-first; a hit from a later service joins an existing
+        // song when artist+title match and durations are within 3 s.
+        for (_, list) in per_source {
+            for t in list {
+                let key = crate::db::match_key(&t.artist, &t.title);
+                let found = out.tracks.iter_mut().find(|h| {
+                    crate::db::match_key(&h.track.artist, &h.track.title) == key
+                        && (h.track.duration_ms as i64 - t.duration_ms as i64).abs() <= 3000
+                });
+                match found {
+                    Some(h) => {
+                        if !h.others.iter().any(|o| o.source == t.source) && h.track.source != t.source {
+                            h.others.push(t);
+                        }
+                    }
+                    None => out.tracks.push(GlobalHit { track: t, others: vec![] }),
+                }
+            }
+        }
+        // Keep the services' relevance: interleave nothing, but float songs found on
+        // several services (a strong signal that it is "the" song) slightly up.
+        let n = out.tracks.len();
+        let mut scored: Vec<(f32, GlobalHit)> = out.tracks.drain(..).enumerate().map(|(i, h)| (i as f32 / n.max(1) as f32 - h.others.len() as f32 * 0.08, h)).collect();
+        scored.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        out.tracks = scored.into_iter().map(|(_, h)| h).take(40).collect();
+        artists.sort_by_key(|(r, _)| *r);
+        for (_, list) in artists {
+            for a in list {
+                let norm = |s: &str| s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>();
+                if !out.artists.iter().any(|x| norm(&x.name) == norm(&a.name)) {
+                    out.artists.push(a);
+                }
+            }
+        }
+        out.artists.truncate(12);
+        out
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistView {
+    pub artist: RemoteArtist,
+    pub description: Option<String>,
+    pub top_tracks: Vec<Track>,
+    pub albums: Vec<RemoteAlbum>,
+    pub similar: Vec<RemoteArtist>,
+}
+
+fn artist_view(p: ArtistPage, db: &Db) -> ArtistView {
+    ArtistView {
+        top_tracks: p
+            .top_tracks
+            .iter()
+            .map(|r| {
+                let mut t = to_track(r, false);
+                if let Some(k) = db.track(&t.id) {
+                    t.saved = k.saved;
+                    t.liked = k.liked;
+                }
+                t
+            })
+            .collect(),
+        artist: p.artist,
+        description: p.description,
+        albums: p.albums,
+        similar: p.similar,
+    }
+}
+
+/// Artist page from a service: `reference` is "<source>:<id>".
+#[tauri::command]
+pub async fn artist_page(app: AppHandle, reference: String) -> Result<ArtistView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (src, id) = reference.split_once(':').ok_or("bad reference")?;
+        let p = app.state::<Sources>().provider(src).ok_or("unknown source")?;
+        let page = p.artist(id).map_err(|e| e.to_string())?;
+        Ok(artist_view(page, &app.state::<Db>()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumView {
+    pub album: RemoteAlbum,
+    pub tracks: Vec<Track>,
+}
+
+#[tauri::command]
+pub async fn album_page(app: AppHandle, reference: String) -> Result<AlbumView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (src, id) = reference.split_once(':').ok_or("bad reference")?;
+        let p = app.state::<Sources>().provider(src).ok_or("unknown source")?;
+        let AlbumPage { album, tracks } = p.album(id).map_err(|e| e.to_string())?;
+        let db = app.state::<Db>();
+        let tracks = tracks
+            .iter()
+            .map(|r| {
+                let mut t = to_track(r, false);
+                if t.cover.is_none() {
+                    t.cover = album.cover_url.clone();
+                }
+                if let Some(k) = db.track(&t.id) {
+                    t.saved = k.saved;
+                    t.liked = k.liked;
+                }
+                t
+            })
+            .collect();
+        Ok(AlbumView { album, tracks })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn norm_name(s: &str) -> String {
+    s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+/// Finds an artist by name on the services (Yandex first: richest pages, works without login).
+fn lookup_artist(app: &AppHandle, name: &str) -> Option<RemoteArtist> {
+    let want = norm_name(name);
+    for (_, p) in ranked_sources(&app.state::<Sources>()) {
+        if let Ok(list) = p.search_artists(name, 5) {
+            if let Some(a) = list.into_iter().find(|a| norm_name(&a.name) == want) {
+                return Some(a);
+            }
+        }
+    }
+    None
+}
+
+/// "<source>:<id>" for a library artist name, looked up once and cached.
+#[tauri::command]
+pub async fn artist_ref(app: AppHandle, name: String) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<Db>();
+        if let Some((_, r, _)) = db.artist_cached(&name) {
+            if !r.is_empty() {
+                return Some(r);
+            }
+        }
+        let a = lookup_artist(&app, &name)?;
+        let r = format!("{}:{}", a.source, a.remote_id);
+        let dir = app.state::<crate::AppState>().cover_dir.clone();
+        let img = a.image_url.as_deref().and_then(|u| cache_image(&dir, u));
+        db.cache_artist(&name, img.as_deref(), &r);
+        Some(r)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+fn cache_image(dir: &std::path::Path, url: &str) -> Option<String> {
+    let mut t = Track { cover: Some(url.to_string()), ..Default::default() };
+    cache_covers(dir, std::slice::from_mut(&mut t));
+    t.cover.filter(|c| !c.starts_with("http"))
+}
+
+/// Photos for library artists: returns what is cached now and fetches the rest in the
+/// background (emitting `oto://artist-images` as they arrive). Misses are retried weekly.
+#[tauri::command]
+pub fn artist_images(app: AppHandle, names: Vec<String>) -> std::collections::HashMap<String, String> {
+    let db = app.state::<Db>();
+    let mut have = std::collections::HashMap::new();
+    let mut missing = vec![];
+    let week = 7 * 24 * 3600 * 1000;
+    for n in names {
+        match db.artist_cached(&n) {
+            Some((Some(img), _, _)) => {
+                have.insert(n, img);
+            }
+            Some((None, _, at)) if now_ms() - at < week => {}
+            _ => missing.push(n),
+        }
+    }
+    if !missing.is_empty() {
+        let app2 = app.clone();
+        std::thread::spawn(move || {
+            let dir = app2.state::<crate::AppState>().cover_dir.clone();
+            for chunk in missing.chunks(6) {
+                let found: Vec<(String, Option<String>, String)> = std::thread::scope(|sc| {
+                    let hs: Vec<_> = chunk
+                        .iter()
+                        .map(|n| {
+                            let app3 = app2.clone();
+                            let dir = dir.clone();
+                            sc.spawn(move || {
+                                let a = lookup_artist(&app3, n);
+                                let img = a.as_ref().and_then(|a| a.image_url.as_deref()).and_then(|u| cache_image(&dir, u));
+                                let r = a.map(|a| format!("{}:{}", a.source, a.remote_id)).unwrap_or_default();
+                                (n.clone(), img, r)
+                            })
+                        })
+                        .collect();
+                    hs.into_iter().filter_map(|h| h.join().ok()).collect()
+                });
+                let db = app2.state::<Db>();
+                let mut update = serde_json::Map::new();
+                for (n, img, r) in found {
+                    db.cache_artist(&n, img.as_deref(), &r);
+                    if let Some(i) = img {
+                        update.insert(n, serde_json::Value::String(i));
+                    }
+                }
+                if !update.is_empty() {
+                    let _ = app2.emit("oto://artist-images", update);
+                }
+            }
+        });
+    }
+    have
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::providers::{soundcloud::SoundCloud, yandex::Yandex, Provider};
+
+    #[test]
+    #[ignore = "network"]
+    fn net_artist_and_album_pages() {
+        let y = Yandex::new(None);
+        let a = y.search_artists("Кино", 3).unwrap();
+        println!("yandex artists: {:?}", a.iter().map(|x| (&x.name, &x.remote_id, x.image_url.is_some(), x.followers)).collect::<Vec<_>>());
+        let page = y.artist(&a[0].remote_id).unwrap();
+        println!("top {} / albums {} / similar {} / desc {}", page.top_tracks.len(), page.albums.len(), page.similar.len(), page.description.is_some());
+        assert!(!page.top_tracks.is_empty() && !page.albums.is_empty());
+        let al = y.album(&page.albums[0].remote_id).unwrap();
+        println!("album '{}' {} tracks", al.album.title, al.tracks.len());
+        assert!(!al.tracks.is_empty());
+
+        let sc = SoundCloud::new(None);
+        let u = sc.search_artists("odesza", 3).unwrap();
+        println!("sc users: {:?}", u.iter().map(|x| (&x.name, x.followers)).collect::<Vec<_>>());
+        let p = sc.artist(&u[0].remote_id).unwrap();
+        println!("sc top {} albums {}", p.top_tracks.len(), p.albums.len());
+        assert!(!p.top_tracks.is_empty());
+    }
 }

@@ -15,6 +15,9 @@
   import SettingsView from "./lib/views/SettingsView.svelte";
   import PlaylistView from "./lib/views/PlaylistView.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
+  import TrackInfo from "./lib/components/TrackInfo.svelte";
+  import ArtistPage from "./lib/views/ArtistPage.svelte";
+  import RemoteAlbumPage from "./lib/views/RemoteAlbumPage.svelte";
 
   function keys(e: KeyboardEvent) {
     const tag = (e.target as HTMLElement)?.tagName;
@@ -39,7 +42,7 @@
   <TitleBar />
   <Sidebar />
   <main class="content panel">
-    {#key app.view + (app.focus?.key ?? "")}
+    {#key app.view + (app.focus?.key ?? "") + (app.focus?.name ?? "")}
       <div class="view" in:fly={{ y: 10, duration: 380, opacity: 0 }}>
         {#if app.view === "home"}<Home />
         {:else if app.view === "library"}<Library />
@@ -49,6 +52,8 @@
         {:else if app.view === "stats"}<Stats />
         {:else if app.view === "settings"}<SettingsView />
         {:else if app.view === "playlist"}<PlaylistView />
+        {:else if app.view === "artist"}<ArtistPage />
+        {:else if app.view === "remote-album"}<RemoteAlbumPage />
         {/if}
       </div>
     {/key}
@@ -60,6 +65,7 @@
 
 {#if app.lyricsOpen}<LyricsView />{/if}
 {#if app.menu}<ContextMenu />{/if}
+{#if app.info}<TrackInfo />{/if}
 
 {#if app.toast}
   {#key app.toast.at}

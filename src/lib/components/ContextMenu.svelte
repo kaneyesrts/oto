@@ -1,8 +1,8 @@
 <script lang="ts">
   // One context menu for tracks everywhere: right click on a row, or its ⋯ button.
-  import { app, player, trackById, toast } from "../store.svelte";
+  import { app, player, trackById, toast, openArtist } from "../store.svelte";
   import { api } from "../api";
-  import { ListPlus, ListEnd, Heart, ChevronRight, X, Disc3, Users, Plus } from "../icons";
+  import { ListPlus, ListEnd, Heart, ChevronRight, X, Disc3, Users, Plus, Info } from "../icons";
 
   const m = $derived(app.menu!);
   const one = $derived(m.ids.length === 1 ? trackById(m.ids[0]) : undefined);
@@ -78,7 +78,8 @@
     {#if one.album}
       <button role="menuitem" onclick={run(() => { app.view = "albums"; app.focus = { kind: "album", key: `${one.albumArtist}\u001f${one.album}` }; })}><Disc3 size={15} /> К альбому</button>
     {/if}
-    <button role="menuitem" onclick={run(() => { app.view = "artists"; app.focus = { kind: "artist", key: one.albumArtist || one.artist }; })}><Users size={15} /> К артисту</button>
+    <button role="menuitem" onclick={run(() => openArtist((one.albumArtist || one.artist).split(",")[0].trim(), one.artistRef || undefined))}><Users size={15} /> К исполнителю</button>
+    <button role="menuitem" onclick={run(() => (app.info = one))}><Info size={15} /> Сведения</button>
   {/if}
 </div>
 
