@@ -65,7 +65,10 @@
       <button class="chip" onclick={() => (app.lyricsOpen = true)}><MicVocal size={15} /> Текст</button>
       <button class="chip" onclick={() => { app.lyricsOpen = true; toggleFullscreen(); }}><Maximize size={15} /> На весь экран</button>
     </div>
-    {#if app.lyrics?.source}<div class="src faint">{sourceLabel(app.lyrics)}</div>{/if}
+    <div class="src faint">
+      {#if app.player.format}<span class="fmt">{app.player.format}</span>{/if}
+      {#if app.lyrics?.source}<span>текст: {sourceLabel(app.lyrics)}</span>{/if}
+    </div>
   </div>
 </section>
 
@@ -123,7 +126,8 @@
   .chip { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--surface); color: var(--text-2); transition: background 0.15s, color 0.15s; }
   .chip:hover { background: var(--surface-2); color: var(--text); }
   :root[data-theme="paper"] .chip { border-radius: 0; border: 1px solid var(--line); background: none; }
-  .src { margin-top: 12px; font-size: 11px; }
+  .src { margin-top: 12px; font-size: 11px; display: flex; gap: 10px; align-items: center; }
+  .fmt { font-family: var(--font-num); letter-spacing: 0.04em; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--line); color: var(--text-2); }
 
   @media (max-width: 1100px) {
     .stage { grid-template-columns: 220px 1fr; }

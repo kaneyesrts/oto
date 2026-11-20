@@ -18,10 +18,32 @@ struct Buf {
     len: Option<u64>,
 }
 
+type Aes128Ctr = ctr::Ctr128BE<aes::Aes128>;
+
 struct Shared {
     buf: Mutex<Buf>,
     cv: Condvar,
     cancel: AtomicBool,
+    /// Decrypts encrypted transports (Yandex lossless) as bytes arrive. Bytes are always
+    /// appended in file order, so the keystream position matches without seeking.
+    cipher: Mutex<Option<Aes128Ctr>>,
+}
+
+impl Shared {
+    fn new() -> Self {
+        Self { buf: Mutex::new(Buf::default()), cv: Condvar::new(), cancel: AtomicBool::new(false), cipher: Mutex::new(None) }
+    }
+
+    fn append(&self, bytes: &[u8]) {
+        let mut chunk = bytes.to_vec();
+        if let Some(c) = self.cipher.lock().as_mut() {
+            use ctr::cipher::StreamCipher;
+            c.apply_keystream(&mut chunk);
+        }
+        let mut b = self.buf.lock();
+        b.data.extend_from_slice(&chunk);
+        self.cv.notify_all();
+    }
 }
 
 pub struct NetStream {
@@ -70,7 +92,23 @@ fn fresh_client() -> reqwest::blocking::Client {
 /// Starts downloading and returns once the first chunk is in (or the request failed),
 /// so the decoder can probe the format immediately.
 pub fn open(src: StreamSource) -> anyhow::Result<Opened> {
-    let shared = Arc::new(Shared { buf: Mutex::new(Buf::default()), cv: Condvar::new(), cancel: AtomicBool::new(false) });
+    let shared = Arc::new(Shared::new());
+    // Pull the internal decryption key out of the headers before anything is sent.
+    let src = match src {
+        StreamSource::Http { url, headers, mime } => {
+            let (key, headers): (Vec<_>, Vec<_>) = headers.into_iter().partition(|(k, _)| k == "x-oto-aes-ctr-key");
+            if let Some((_, hexkey)) = key.first() {
+                use ctr::cipher::KeyIvInit;
+                let k = hex::decode(hexkey).map_err(|e| anyhow::anyhow!("bad stream key: {e}"))?;
+                if k.len() != 16 {
+                    anyhow::bail!("unexpected stream key length {}", k.len());
+                }
+                *shared.cipher.lock() = Some(Aes128Ctr::new(k.as_slice().into(), &[0u8; 16].into()));
+            }
+            StreamSource::Http { url, headers, mime }
+        }
+        other => other,
+    };
     let mime = match &src {
         StreamSource::Http { mime, .. } => mime.clone(),
         StreamSource::Hls { mime, .. } => match mime.as_deref() {
@@ -142,9 +180,7 @@ fn pump(sh: &Shared, mut r: impl Read) -> Result<u64, (u64, anyhow::Error)> {
             return Ok(got);
         }
         got += n as u64;
-        let mut b = sh.buf.lock();
-        b.data.extend_from_slice(&chunk[..n]);
-        sh.cv.notify_all();
+        sh.append(&chunk[..n]);
     }
 }
 
@@ -197,9 +233,7 @@ fn fetch_ranged(sh: &Shared, url: &str, headers: &[(String, String)], mut from: 
             }
             let n = bytes.len() as u64;
             if n > 0 {
-                let mut b = sh.buf.lock();
-                b.data.extend_from_slice(&bytes);
-                sh.cv.notify_all();
+                sh.append(&bytes);
             }
             from += n;
             if n < CHUNK {
@@ -231,7 +265,7 @@ fn fetch_resilient(sh: &Shared, url: &str, headers: &[(String, String)], set_len
 
 /// Downloads a whole (small) resource with the same stall handling, into memory.
 fn download(url: &str, headers: &[(String, String)]) -> anyhow::Result<Vec<u8>> {
-    let tmp = Shared { buf: Mutex::new(Buf::default()), cv: Condvar::new(), cancel: AtomicBool::new(false) };
+    let tmp = Shared::new();
     fetch_resilient(&tmp, url, headers, false)?;
     Ok(std::mem::take(&mut tmp.buf.lock().data))
 }
@@ -365,7 +399,7 @@ mod tests {
 
     #[test]
     fn reader_waits_for_bytes_and_seeks() {
-        let shared = Arc::new(Shared { buf: Mutex::new(Buf::default()), cv: Condvar::new(), cancel: AtomicBool::new(false) });
+        let shared = Arc::new(Shared::new());
         let sh = shared.clone();
         std::thread::spawn(move || {
             for i in 0..4u8 {

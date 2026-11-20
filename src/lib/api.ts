@@ -81,6 +81,7 @@ export interface PlayerState {
   index: number;
   at: number;
   buffering?: boolean;
+  format?: string;
 }
 
 export interface SpectrumFrame {
@@ -159,6 +160,8 @@ export interface AudioSettings {
   eqPreamp: number;
   eqGains: number[];
   eqPreset: string;
+  /** "lossless" (FLAC where available) | "high" (320 kbps) | "normal". */
+  streamQuality: string;
 }
 
 export interface Stats {

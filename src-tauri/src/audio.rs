@@ -55,6 +55,8 @@ pub struct PlayerState {
     pub at: i64,
     /// Waiting for a network stream to start.
     pub buffering: bool,
+    /// What is actually playing: "FLAC · 44.1 кГц", "MP3 · 48 кГц" …
+    pub format: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -397,9 +399,9 @@ impl Engine {
                 return;
             }
             let Ok(dec) = File::open(&track.path).map_err(anyhow::Error::from).and_then(|f| Ok(rodio::Decoder::try_from(f)?)) else { return };
-            let sample_rate = dec.sample_rate().get();
+            let sample_rate = self.sink.config().sample_rate().get();
             if let Some(p) = &self.player {
-                p.append(Tap { inner: crate::eq::Eq::new(dec, self.eq.clone()), ring: self.ring.clone(), acc: 0.0, n: 0, local: Vec::with_capacity(256) });
+                p.append(self.chain(dec));
                 self.prepared = Some(Prepared { index: next, track, sample_rate });
             }
         }
@@ -520,6 +522,8 @@ impl Engine {
     fn open_source(&mut self, t: &Track, autoplay: bool) -> anyhow::Result<()> {
         if t.source == "local" {
             let dec = rodio::Decoder::try_from(File::open(&t.path)?)?;
+            let ext = std::path::Path::new(&t.path).extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
+            self.set_format(&ext, dec.sample_rate().get());
             self.start(dec, autoplay);
             return Ok(());
         }
@@ -529,6 +533,7 @@ impl Engine {
             backend.play(uri, 0)?;
             backend.wait_started(Duration::from_secs(12))?;
             let source = crate::providers::spotify::SpotifySource { backend, duration: Duration::from_millis(t.duration_ms) };
+            self.set_format("OGG 320", 44_100);
             self.start(source, autoplay);
             return Ok(());
         }
@@ -541,16 +546,38 @@ impl Engine {
             b = b.with_mime_type(m);
         }
         let dec = b.build()?;
+        let codec = match opened.mime.as_deref().unwrap_or("") {
+            m if m.contains("flac") => "FLAC",
+            m if m.contains("mpeg") => "MP3",
+            m if m.contains("aac") || m.contains("mp4") => "AAC",
+            m if m.contains("ogg") || m.contains("opus") => "OGG",
+            _ => "",
+        };
+        self.set_format(codec, dec.sample_rate().get());
         self.start(dec, autoplay);
         Ok(())
     }
 
+    fn set_format(&self, codec: &str, rate: u32) {
+        let khz = rate as f32 / 1000.0;
+        let khz = if (khz - khz.round()).abs() < 0.01 { format!("{}", khz.round()) } else { format!("{khz:.1}") };
+        self.state.write().format = if codec.is_empty() { format!("{khz} кГц") } else { format!("{codec} · {khz} кГц") };
+    }
+
+    /// decoder → high-quality resampler (to the device rate) → EQ → analyser tap.
+    /// With the source already at the device rate, rodio's own (linear) converter never runs.
+    fn chain<S: Source + Send + 'static>(&self, dec: S) -> impl Source + Send + 'static {
+        let dev_rate = self.sink.config().sample_rate().get();
+        let rs = crate::resample::Resample::new(dec, dev_rate);
+        self.ring.sr.store(dev_rate, Ordering::Relaxed);
+        Tap { inner: crate::eq::Eq::new(rs, self.eq.clone()), ring: self.ring.clone(), acc: 0.0, n: 0, local: Vec::with_capacity(256) }
+    }
+
     fn start<S: Source + Send + 'static>(&mut self, dec: S, autoplay: bool) {
-        self.ring.sr.store(dec.sample_rate().get(), Ordering::Relaxed);
         let player = Player::connect_new(self.sink.mixer());
         let vol = self.state.read().volume;
         player.set_volume(vol * vol);
-        player.append(Tap { inner: crate::eq::Eq::new(dec, self.eq.clone()), ring: self.ring.clone(), acc: 0.0, n: 0, local: Vec::with_capacity(256) });
+        player.append(self.chain(dec));
         if autoplay {
             player.play();
         } else {

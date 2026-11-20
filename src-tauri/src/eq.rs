@@ -74,6 +74,7 @@ pub struct Eq<S: Source> {
     z: Vec<[[f32; 4]; MAX_CH]>,
     pre: f32,
     on: bool,
+    limit: bool,
     ch: usize,
     fs: u32,
     tick: u32,
@@ -81,7 +82,7 @@ pub struct Eq<S: Source> {
 
 impl<S: Source> Eq<S> {
     pub fn new(inner: S, params: Arc<EqParams>) -> Self {
-        let mut e = Self { inner, params, seen: u32::MAX, active: vec![], z: vec![], pre: 1.0, on: false, ch: 0, fs: 0, tick: 0 };
+        let mut e = Self { inner, params, seen: u32::MAX, active: vec![], z: vec![], pre: 1.0, on: false, limit: false, ch: 0, fs: 0, tick: 0 };
         e.refresh();
         e
     }
@@ -104,6 +105,10 @@ impl<S: Source> Eq<S> {
                 (g.abs() > 0.05).then(|| (i, Biquad::peaking(f, g, fs as f32)))
             })
             .collect();
+        // Any boost above unity can clip; a flat or cut-only curve is left untouched.
+        let max_gain = (0..10).map(|i| f32::from_bits(self.params.gains_db[i].load(Ordering::Relaxed))).fold(0f32, f32::max);
+        let pre_db = f32::from_bits(self.params.preamp_db.load(Ordering::Relaxed));
+        self.limit = pre_db + max_gain > 0.05;
         if self.z.len() != BANDS.len() {
             self.z = vec![[[0.0; 4]; MAX_CH]; BANDS.len()];
         }
@@ -113,7 +118,7 @@ impl<S: Source> Eq<S> {
 #[inline]
 fn soft_clip(x: f32) -> f32 {
     let a = x.abs();
-    if a <= 0.8 { x } else { x.signum() * (0.8 + 0.2 * ((a - 0.8) / 0.2).tanh()) }
+    if a <= 0.92 { x } else { x.signum() * (0.92 + 0.08 * ((a - 0.92) / 0.08).tanh()) }
 }
 
 impl<S: Source> Iterator for Eq<S> {
@@ -141,7 +146,7 @@ impl<S: Source> Iterator for Eq<S> {
             z[2] = y;
             x = y;
         }
-        Some(soft_clip(x))
+        Some(if self.limit { soft_clip(x) } else { x })
     }
 }
 

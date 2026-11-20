@@ -23,6 +23,7 @@ pub struct Sources {
     yandex: RwLock<Arc<Yandex>>,
     soundcloud: RwLock<Arc<SoundCloud>>,
     spotify: RwLock<Arc<Spotify>>,
+    quality: RwLock<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -43,6 +44,7 @@ impl Sources {
             yandex: RwLock::new(Arc::new(Yandex::new(creds.yandex_token.clone()))),
             soundcloud: RwLock::new(Arc::new(SoundCloud::new(creds.soundcloud_oauth.clone()))),
             spotify: RwLock::new(Arc::new(Spotify::new(creds.spotify_refresh.clone()))),
+            quality: RwLock::new("lossless".into()),
             creds: RwLock::new(creds),
             path,
         }
@@ -79,9 +81,16 @@ impl Sources {
         self.yandex.read().clone()
     }
 
+    pub fn set_quality(&self, q: &str) {
+        *self.quality.write() = q.to_string();
+        self.yandex.read().set_quality(q);
+    }
+
     pub fn set_yandex_token(&self, token: Option<String>) {
         self.creds.write().yandex_token = token.clone();
-        *self.yandex.write() = Arc::new(Yandex::new(token));
+        let y = Yandex::new(token);
+        y.set_quality(&self.quality.read());
+        *self.yandex.write() = Arc::new(y);
         self.save();
     }
 
@@ -769,3 +778,4 @@ mod tests {
         assert!(!p.top_tracks.is_empty());
     }
 }
+

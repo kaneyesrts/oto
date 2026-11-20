@@ -1,9 +1,9 @@
 <script lang="ts">
   // Search results from a streaming service. Click plays (tracks are stored on the fly),
   // + puts a track into the library.
-  import { app, playRemote, trackById, toast } from "../store.svelte";
+  import { app, playRemote, trackById, player } from "../store.svelte";
   import { api, coverUrl, fmtTime, type Track } from "../api";
-  import { Play, Plus, Heart } from "../icons";
+  import { Play, Heart } from "../icons";
 
   let { source, query }: { source: string; query: string } = $props();
 
@@ -33,12 +33,6 @@
     }, 450);
   });
 
-  async function save(t: Track) {
-    await api.sourceStore([t], true);
-    t.saved = true;
-    results = [...results];
-    toast("Добавлено в библиотеку");
-  }
   const current = $derived(app.player.track?.id);
 </script>
 
@@ -63,12 +57,7 @@
         </button>
         <span class="tt"><span class="name ellipsis">{t.title}</span><span class="by ellipsis">{t.artist}{t.album ? ` · ${t.album}` : ""}</span></span>
         <span class="act">
-          {#if (known ?? t).saved}
-            <span class="in faint">в библиотеке</span>
-          {:else}
-            <button class="icon-btn" onclick={() => save(t)} title="В библиотеку" aria-label="В библиотеку"><Plus size={16} /></button>
-          {/if}
-          {#if known}<button class="icon-btn" class:on={known.liked} onclick={() => api.toggleLike(t.id)} aria-label="В избранное"><Heart size={15} fill={known.liked ? "currentColor" : "none"} /></button>{/if}
+          <button class="icon-btn" class:on={(known ?? t).liked} onclick={async () => { await player.likeTrack(known ?? t); results = [...results]; }} title={(known ?? t).liked ? "Убрать из библиотеки" : "Лайк: трек попадёт в библиотеку"} aria-label="Лайк"><Heart size={16} fill={(known ?? t).liked ? "currentColor" : "none"} /></button>
         </span>
         <span class="d num muted">{fmtTime(t.durationMs)}</span>
       </div>
@@ -92,6 +81,5 @@
   .name { font-weight: 550; font-size: 13.5px; }
   .by { font-size: 12px; color: var(--text-2); }
   .act { display: flex; align-items: center; gap: 2px; }
-  .in { font-size: 11.5px; padding-right: 6px; }
   .d { text-align: right; font-size: 12px; }
 </style>

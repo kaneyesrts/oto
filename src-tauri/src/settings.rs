@@ -49,10 +49,12 @@ pub struct AudioSettings {
     /// dB for 31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k Hz.
     pub eq_gains: Vec<f32>,
     pub eq_preset: String,
+    /// Streaming quality: "lossless" (FLAC where the service allows), "high", "normal".
+    pub stream_quality: String,
 }
 impl Default for AudioSettings {
     fn default() -> Self {
-        Self { crossfade_ms: 0, gapless: true, eq_enabled: false, eq_preamp: 0.0, eq_gains: vec![0.0; 10], eq_preset: "flat".into() }
+        Self { crossfade_ms: 0, gapless: true, eq_enabled: false, eq_preamp: 0.0, eq_gains: vec![0.0; 10], eq_preset: "flat".into(), stream_quality: "lossless".into() }
     }
 }
 

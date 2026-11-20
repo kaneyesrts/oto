@@ -107,6 +107,7 @@
   <section>
     <h2>Звук</h2>
     <div class="opts">
+      {@render choice(s.audio.streamQuality, [["lossless", "Без потерь"], ["high", "Высокое"], ["normal", "Экономное"]], (v) => set((x) => (x.audio.streamQuality = v)), "Качество стриминга")}
       {@render toggle(s.audio.gapless, () => set((x) => (x.audio.gapless = !x.audio.gapless)), "Без пауз между треками", "Альбомы с непрерывным звуком играют слитно (для файлов)")}
       {@render slider(s.audio.crossfadeMs / 1000, 0, 12, 0.5, (v) => set((x) => (x.audio.crossfadeMs = Math.round(v * 1000))), "Кроссфейд", (v) => (v ? `${v} с` : "выкл"))}
       {@render toggle(s.audio.eqEnabled, () => set((x) => (x.audio.eqEnabled = !x.audio.eqEnabled)), "Эквалайзер", "Двойной клик по полосе сбрасывает её")}

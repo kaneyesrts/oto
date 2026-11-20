@@ -275,6 +275,17 @@ export const player = {
     const target = id ?? app.player.track?.id;
     if (target) await api.toggleLike(target);
   },
+  /** Like a track that may not be stored yet (search results, artist pages). */
+  async likeTrack(t: Track) {
+    if (!trackIndex.has(t.id)) {
+      await api.sourceStore([t], false);
+      trackIndex.set(t.id, t);
+    }
+    const liked = await api.toggleLike(t.id);
+    t.liked = liked;
+    t.saved = liked || t.source === "local";
+    return liked;
+  },
 };
 
 /** Wires backend events. `withLibrary` is false for the small windows (widget, flyout). */
@@ -306,7 +317,7 @@ export async function init(withLibrary: boolean) {
   await listen<{ id: string; liked: boolean }>("oto://liked", (e) => {
     const t = trackIndex.get(e.payload.id);
     if (t) t.liked = e.payload.liked;
-    app.tracks = app.tracks.map((x) => (x.id === e.payload.id ? { ...x, liked: e.payload.liked } : x));
+    app.tracks = app.tracks.map((x) => (x.id === e.payload.id ? { ...x, liked: e.payload.liked, saved: e.payload.liked || x.source === "local" } : x));
     reindex();
     if (app.player.track?.id === e.payload.id) app.player.track = { ...app.player.track, liked: e.payload.liked };
   });

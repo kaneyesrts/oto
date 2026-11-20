@@ -5,7 +5,7 @@
   import { api, coverUrl, fmtTime, type GlobalResults, type Track } from "../api";
   import { search } from "../groups";
   import SourceBadge from "./SourceBadge.svelte";
-  import { Play, Plus, Info } from "../icons";
+  import { Play, Info, Heart } from "../icons";
 
   let { query }: { query: string } = $props();
 
@@ -34,11 +34,6 @@
     const tracks = res.tracks.map((h) => h.track);
     const extra = res.tracks.flatMap((h) => h.others);
     playRemote(tracks, i, extra);
-  }
-  async function save(t: Track) {
-    await api.sourceStore([t], true);
-    t.saved = true;
-    res = res ? { ...res } : res;
   }
   const notConnected = $derived(app.sources.filter((s) => !s.connected).map((s) => s.name));
 </script>
@@ -101,7 +96,7 @@
               </span>
               <span class="acts">
                 <button class="icon-btn mini" onclick={() => (app.info = known ?? h.track)} aria-label="Сведения"><Info size={15} /></button>
-                {#if !(known ?? h.track).saved}<button class="icon-btn mini" onclick={() => save(h.track)} aria-label="В библиотеку" title="В библиотеку"><Plus size={16} /></button>{/if}
+                <button class="icon-btn mini" class:on={(known ?? h.track).liked} onclick={async () => { await player.likeTrack(known ?? h.track); res = res ? { ...res } : res; }} aria-label="Лайк" title={(known ?? h.track).liked ? "Убрать из библиотеки" : "Лайк: трек попадёт в библиотеку"}><Heart size={15} fill={(known ?? h.track).liked ? "currentColor" : "none"} /></button>
               </span>
               <span class="num faint d">{fmtTime(h.track.durationMs)}</span>
             </div>
@@ -141,8 +136,9 @@
   .link { color: inherit; }
   .link:hover { color: var(--text); text-decoration: underline; }
   .badges { display: flex; gap: 4px; }
-  .acts { display: flex; gap: 2px; opacity: 0; }
-  .row:hover .acts { opacity: 1; }
+  .acts { display: flex; gap: 2px; }
+  .acts .icon-btn:not(.on) { opacity: 0; }
+  .row:hover .acts .icon-btn { opacity: 1; }
   .icon-btn.mini { width: 30px; height: 30px; }
   .d { text-align: right; font-size: 12px; }
   .artists { display: grid; grid-auto-flow: column; grid-auto-columns: 132px; gap: 16px; overflow-x: auto; padding-bottom: 6px; }

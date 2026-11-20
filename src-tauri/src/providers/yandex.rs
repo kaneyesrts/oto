@@ -51,12 +51,13 @@ pub struct Yandex {
     uid: Mutex<Option<u64>>,
     /// Built lazily so `new()` is safe to call from inside an async runtime.
     client: OnceLock<Client>,
+    quality: Mutex<String>,
 }
 
 impl Yandex {
     pub fn new(token: Option<String>) -> Self {
         let token = token.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-        Self { token, uid: Mutex::new(None), client: OnceLock::new() }
+        Self { token, uid: Mutex::new(None), client: OnceLock::new(), quality: Mutex::new("lossless".into()) }
     }
 
     /// Display name for the settings UI: display name, else login, else full name.
@@ -159,9 +160,9 @@ impl Yandex {
     }
 
     /// Classic flow: download-info → XML → md5-signed `get-mp3` link.
-    fn stream_classic(&self, track_id: &str) -> anyhow::Result<StreamSource> {
+    fn stream_classic(&self, track_id: &str, max_kbps: u64) -> anyhow::Result<StreamSource> {
         let infos = self.send(self.get(&format!("/tracks/{track_id}/download-info")))?;
-        let best = pick_download_info(&infos).ok_or_else(|| anyhow!("Yandex: no playable mp3 for this track"))?;
+        let best = pick_download_info(&infos, max_kbps).ok_or_else(|| anyhow!("Yandex: no playable mp3 for this track"))?;
         let info_url = best["downloadInfoUrl"].as_str().ok_or_else(|| anyhow!("Yandex: no downloadInfoUrl"))?;
         let xml = self
             .http()
@@ -174,12 +175,12 @@ impl Yandex {
         Ok(StreamSource::Http { url, headers: Vec::new(), mime: Some("audio/mpeg".into()) })
     }
 
-    /// Newer signed endpoint used by the desktop app. Fallback only: the classic flow is
-    /// verified to work and needs no client-specific key.
-    fn stream_file_info(&self, track_id: &str) -> anyhow::Result<StreamSource> {
-        let (quality, codecs, transport) = ("hq", ["mp3"], "raw");
+    /// Signed endpoint used by the desktop app; the only way to lossless FLAC (Plus).
+    /// Encrypted transports come back with an AES-128-CTR key, passed to the network layer
+    /// through the internal `x-oto-aes-ctr-key` header (stripped before any request).
+    fn stream_file_info(&self, track_id: &str, quality: &str, codecs: &[&str], transport: &str) -> anyhow::Result<StreamSource> {
         let ts = unix_now();
-        let sign = file_info_sign(ts, track_id, quality, &codecs, transport);
+        let sign = file_info_sign(ts, track_id, quality, codecs, transport);
         let rb = self.api(reqwest::Method::GET, "/get-file-info", DESKTOP_CLIENT).query(&[
             ("ts", ts.to_string()),
             ("trackId", track_id.to_string()),
@@ -190,17 +191,30 @@ impl Yandex {
         ]);
         let info = self.send(rb)?;
         let info = &info["downloadInfo"];
-        if info["transport"].as_str().is_some_and(|t| t != "raw") {
-            bail!("Yandex: get-file-info returned an encrypted stream");
-        }
         let url = info["url"].as_str().ok_or_else(|| anyhow!("Yandex: get-file-info without url"))?;
+        let mut headers = Vec::new();
+        match info["transport"].as_str() {
+            Some("raw") | None => {}
+            Some("encraw") => {
+                let key = info["key"].as_str().ok_or_else(|| anyhow!("Yandex: encrypted stream without key"))?;
+                headers.push(("x-oto-aes-ctr-key".to_string(), key.to_string()));
+            }
+            Some(t) => bail!("Yandex: unsupported transport {t}"),
+        }
         let mime = match info["codec"].as_str().unwrap_or("mp3") {
             "mp3" => "audio/mpeg",
             "aac" | "he-aac" => "audio/aac",
             "flac" => "audio/flac",
+            // MP4 containers; the codec is kept in the hint so the UI can say "FLAC".
+            "flac-mp4" => "audio/mp4; codecs=flac",
             _ => "audio/mp4",
         };
-        Ok(StreamSource::Http { url: url.to_string(), headers: Vec::new(), mime: Some(mime.into()) })
+        Ok(StreamSource::Http { url: url.to_string(), headers, mime: Some(mime.into()) })
+    }
+
+    /// "lossless" | "high" | "normal" (see settings → Звук).
+    pub fn set_quality(&self, q: &str) {
+        *self.quality.lock() = q.to_string();
     }
 
     /// Tracks from a radio station: "genre:rock", "track:123", "artist:456" … (needs login).
@@ -283,10 +297,25 @@ impl Provider for Yandex {
 
     fn stream(&self, remote_id: &str) -> anyhow::Result<StreamSource> {
         let track_id = remote_id.split(':').next().unwrap_or(remote_id);
-        match self.stream_classic(track_id) {
+        let quality = self.quality.lock().clone();
+        if quality == "lossless" && self.authorized() {
+            // Yandex serves lossless as FLAC inside MP4, and only over the encrypted
+            // transport (AES-128-CTR, key in the response; decrypted while downloading).
+            // Plain flac/raw is kept as a second try for tracks that have it.
+            for (codecs, transport) in [
+                (&["flac-mp4", "aac-mp4", "he-aac-mp4"][..], "encraw"),
+                (&["flac", "aac", "mp3"][..], "raw"),
+            ] {
+                if let Ok(s) = self.stream_file_info(track_id, "lossless", codecs, transport) {
+                    return Ok(s);
+                }
+            }
+        }
+        let cap = if quality == "normal" { 192 } else { u64::MAX };
+        match self.stream_classic(track_id, cap) {
             Ok(s) => Ok(s),
             Err(e) if self.authorized() => self
-                .stream_file_info(track_id)
+                .stream_file_info(track_id, "hq", &["mp3"], "raw")
                 .map_err(|e2| anyhow!("{e:#}; get-file-info fallback: {e2:#}")),
             Err(e) => Err(e),
         }
@@ -477,12 +506,11 @@ fn mp3_url_from_xml(xml: &str) -> Option<String> {
 }
 
 /// Best mp3 entry of a download-info list: full tracks before previews, then highest bitrate.
-fn pick_download_info(infos: &Value) -> Option<&Value> {
-    infos
-        .as_array()?
-        .iter()
-        .filter(|i| i["codec"].as_str() == Some("mp3") && i["downloadInfoUrl"].is_string())
-        .max_by_key(|i| (!i["preview"].as_bool().unwrap_or(false), i["bitrateInKbps"].as_u64().unwrap_or(0)))
+fn pick_download_info(infos: &Value, max_kbps: u64) -> Option<&Value> {
+    let all = infos.as_array()?;
+    let mp3 = || all.iter().filter(|i| i["codec"].as_str() == Some("mp3") && i["downloadInfoUrl"].is_string());
+    let key = |i: &&Value| (!i["preview"].as_bool().unwrap_or(false), i["bitrateInKbps"].as_u64().unwrap_or(0));
+    mp3().filter(|i| i["bitrateInKbps"].as_u64().unwrap_or(0) <= max_kbps).max_by_key(key).or_else(|| mp3().max_by_key(key))
 }
 
 /// `avatars.yandex.net/get-music-content/.../%%` → `https://avatars.yandex.net/.../1000x1000`.
@@ -616,10 +644,10 @@ mod tests {
             {"codec": "mp3", "preview": false, "bitrateInKbps": 192, "downloadInfoUrl": "f192"},
             {"codec": "mp3", "preview": false, "bitrateInKbps": 320, "downloadInfoUrl": "f320"},
         ]);
-        assert_eq!(pick_download_info(&infos).unwrap()["downloadInfoUrl"], "f320");
+        assert_eq!(pick_download_info(&infos, u64::MAX).unwrap()["downloadInfoUrl"], "f320");
         let previews = json!([{"codec": "mp3", "preview": true, "bitrateInKbps": 128, "downloadInfoUrl": "p"}]);
-        assert_eq!(pick_download_info(&previews).unwrap()["downloadInfoUrl"], "p");
-        assert!(pick_download_info(&json!([])).is_none());
+        assert_eq!(pick_download_info(&previews, u64::MAX).unwrap()["downloadInfoUrl"], "p");
+        assert!(pick_download_info(&json!([]), u64::MAX).is_none());
     }
 
     #[test]

@@ -86,8 +86,16 @@ pub fn dispatch(app: &AppHandle, action: Action) {
 
 pub fn toggle_like(app: &AppHandle, id: &str) -> bool {
     let db = app.state::<Db>();
-    let liked = !db.track(id).map(|t| t.liked).unwrap_or(false);
+    let Some(track) = db.track(id) else { return false };
+    let liked = !track.liked;
     db.set_liked(id, liked);
+    // One button: a like puts the track in the library; un-liking a streaming track takes
+    // it out again (files on disk always stay).
+    let saved = liked || track.source == "local";
+    if saved != track.saved {
+        db.set_saved(id, saved);
+        let _ = app.emit("oto://library", ());
+    }
     app.state::<Audio>().send(Cmd::RefreshTrack(id.to_string()));
     let _ = app.emit("oto://liked", serde_json::json!({ "id": id, "liked": liked }));
     liked
@@ -123,6 +131,7 @@ pub fn apply_settings(app: &AppHandle, old: &Settings, new: &Settings) -> Vec<St
     apply_widget(app, new);
     if old.audio != new.audio {
         app.state::<Audio>().send(Cmd::Audio(new.audio.clone()));
+        app.state::<crate::sources::Sources>().set_quality(&new.audio.stream_quality);
     }
     let _ = app.emit("oto://settings", new);
     errors

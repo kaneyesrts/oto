@@ -49,6 +49,9 @@ md-5 = "0.11.0"
 librespot-core = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
 librespot-playback = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
 librespot-oauth = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+aes = "0.8"
+ctr = "0.9"
+hex = "0.4"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

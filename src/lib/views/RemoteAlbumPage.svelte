@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { app, playRemote, openArtist, back, toast } from "../store.svelte";
+  import { app, playRemote, openArtist, back, toast, player } from "../store.svelte";
   import { api, fmtDuration, fmtTime, plural, type AlbumView } from "../api";
   import SourceBadge from "../components/SourceBadge.svelte";
-  import { Play, Shuffle, ArrowLeft, Plus } from "../icons";
+  import { Play, Shuffle, ArrowLeft, Heart } from "../icons";
 
   let view = $state<AlbumView | null>(null);
   let error = $state("");
@@ -20,10 +20,10 @@
     for (let i = t.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [t[i], t[j]] = [t[j], t[i]]; }
     playRemote(t, 0);
   }
-  async function saveAll() {
+  async function likeAll() {
     if (!view) return;
-    await api.sourceStore(view.tracks, true);
-    toast(`Альбом «${view.album.title}» добавлен в библиотеку`);
+    for (const t of view.tracks) if (!t.liked) await player.likeTrack(t);
+    toast(`Альбом «${view.album.title}» в избранном и в библиотеке`);
   }
 </script>
 
@@ -42,7 +42,7 @@
           <div class="acts">
             <button class="pill solid" onclick={() => playRemote(view!.tracks, 0)}><Play size={15} fill="currentColor" strokeWidth={0} /> Слушать</button>
             <button class="pill ghost" onclick={shuffled}><Shuffle size={15} /> Перемешать</button>
-            <button class="pill ghost" onclick={saveAll}><Plus size={15} /> В библиотеку</button>
+            <button class="pill ghost" onclick={likeAll}><Heart size={15} /> Лайкнуть альбом</button>
           </div>
         {/if}
       </div>

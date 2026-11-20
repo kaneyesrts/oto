@@ -4,6 +4,7 @@ mod eq;
 mod fmp4;
 mod library;
 mod providers;
+mod resample;
 mod lyrics;
 mod settings;
 mod sources;
@@ -283,6 +284,7 @@ pub fn run() {
             app.manage(AppState { settings: RwLock::new(s.clone()), settings_path, cover_dir: cache.join("covers") });
             app.manage(shell::Shell::default());
             app.manage(sources::Sources::load(cfg.join("credentials.json")));
+            app.state::<sources::Sources>().set_quality(&s.audio.stream_quality);
             app.manage(audio::start(h.clone(), volume));
             app.state::<Audio>().send(Cmd::Audio(s.audio.clone()));
 

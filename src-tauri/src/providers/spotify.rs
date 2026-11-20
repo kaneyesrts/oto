@@ -302,7 +302,9 @@ impl Backend {
         let player = {
             let _guard = rt.enter();
             let q = queue.clone();
-            Player::new(PlayerConfig::default(), session.clone(), Box::new(NoOpVolume), move || Box::new(QueueSink(q)))
+            // Premium streams up to 320 kbps; librespot defaults to 160.
+            let cfg = PlayerConfig { bitrate: librespot_playback::config::Bitrate::Bitrate320, ..PlayerConfig::default() };
+            Player::new(cfg, session.clone(), Box::new(NoOpVolume), move || Box::new(QueueSink(q)))
         };
         let mut events = player.get_player_event_channel();
         let q = queue.clone();
