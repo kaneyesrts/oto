@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, type LyricsDoc, type PlayerState, type Playlist, type Settings, type SpectrumFrame, type Track } from "./api";
+import { api, type LyricsDoc, type PlayerState, type Playlist, type Settings, type SourceStatus, type SpectrumFrame, type Track } from "./api";
 import { applyPalette } from "./color";
 
 export type View = "home" | "library" | "albums" | "artists" | "liked" | "stats" | "settings" | "playlist";
@@ -26,6 +26,7 @@ export const app = $state({
   /** Album or artist opened from a grid. */
   focus: null as null | { kind: "album" | "artist" | "playlist"; key: string },
   playlists: [] as Playlist[],
+  sources: [] as SourceStatus[],
   /** Context menu for one or more tracks, opened by right click or the ⋯ button. */
   menu: null as null | { x: number; y: number; ids: string[]; playlistId?: number; index?: number },
   fullscreen: false,
@@ -92,6 +93,23 @@ export async function loadLyrics(force = false) {
   } finally {
     if (lyricsFor === t.id) app.lyricsLoading = false;
   }
+}
+
+/** Library rows: saved, and only the best copy of each recording. */
+export const libraryTracks = () => app.tracks.filter((t) => t.saved !== false && !t.hidden);
+
+export async function refreshSources() {
+  app.sources = await api.sources();
+}
+
+/** Plays tracks that may not be stored yet (search results): store them first. */
+export async function playRemote(tracks: Track[], start: number) {
+  const unknown = tracks.filter((t) => !trackIndex.has(t.id));
+  if (unknown.length) {
+    await api.sourceStore(unknown, false);
+    for (const t of unknown) trackIndex.set(t.id, t);
+  }
+  player.playList(tracks.map((t) => t.id), start);
 }
 
 export async function refreshPlaylists() {
@@ -188,6 +206,8 @@ export async function init(withLibrary: boolean) {
     await listen("oto://library", () => refreshTracks());
     await listen("oto://playlists", () => refreshPlaylists());
     await refreshPlaylists();
+    await listen("oto://sources", () => refreshSources());
+    refreshSources();
   }
   if (app.player.track) loadLyrics();
   if (!ticking) { ticking = true; requestAnimationFrame(tick); }

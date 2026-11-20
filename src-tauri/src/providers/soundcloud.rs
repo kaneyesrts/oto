@@ -950,6 +950,7 @@ mod tests {
                     );
                     played = true;
                 }
+                Ok(StreamSource::Spotify { .. }) => unreachable!(),
                 Err(e) => println!("{}: {e:#}", t.remote_id),
             }
             if played {

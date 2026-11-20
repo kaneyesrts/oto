@@ -1,16 +1,21 @@
 <script lang="ts">
-  import { app, player } from "../store.svelte";
+  import { app, libraryTracks, player } from "../store.svelte";
   import { fmtDuration, plural } from "../api";
   import { search } from "../groups";
   import TrackList from "../components/TrackList.svelte";
+  import OnlineResults from "../components/OnlineResults.svelte";
   import { Play, Shuffle } from "../icons";
 
   let { liked = false } = $props();
   type Sort = "artist" | "title" | "added" | "duration";
   let sort = $state<Sort>("artist");
+  // Where to search: the library, or a streaming service.
+  let where = $state("library");
+  const online = $derived(app.sources.filter((s) => s.connected || s.worksAnonymously));
+  $effect(() => { if (!app.search) where = "library"; });
 
   const list = $derived.by(() => {
-    let l = liked ? app.tracks.filter((t) => t.liked) : app.tracks;
+    let l = liked ? libraryTracks().filter((t) => t.liked) : libraryTracks();
     l = search(l, app.search);
     if (sort === "title") l = [...l].sort((a, b) => a.title.localeCompare(b.title));
     else if (sort === "added") l = [...l].sort((a, b) => b.addedAt - a.addedAt);
@@ -34,7 +39,13 @@
       <h1>{liked ? "Избранное" : app.search ? `«${app.search}»` : "Все треки"}</h1>
       <div class="muted sub">{list.length} {plural(list.length, "трек", "трека", "треков")} · {fmtDuration(total)}</div>
     </div>
-    <div class="actions">
+    {#if app.search && !liked}
+      <div class="seg where">
+        <button class:on={where === "library"} onclick={() => (where = "library")}>Библиотека <em>{list.length}</em></button>
+        {#each online as src}<button class:on={where === src.id} onclick={() => (where = src.id)}>{src.name}</button>{/each}
+      </div>
+    {/if}
+    <div class="actions" class:hidden={where !== "library"}>
       <div class="seg">
         {#each sorts as [k, label]}
           <button class:on={sort === k} onclick={() => (sort = k)}>{label}</button>
@@ -45,7 +56,9 @@
     </div>
   </header>
   <div class="body">
-    {#if list.length}
+    {#if where !== "library"}
+      <OnlineResults source={where} query={app.search} />
+    {:else if list.length}
       <TrackList tracks={list} />
     {:else}
       <div class="empty muted">{liked ? "Нажмите ♥ у трека, чтобы он появился здесь." : "Ничего не найдено."}</div>
@@ -61,6 +74,8 @@
   :root[data-theme="paper"] h1 { font-style: italic; font-size: clamp(40px, 5vw, 72px); }
   .sub { font-size: 13px; }
   .actions { display: flex; align-items: center; gap: 10px; }
+  .actions.hidden { display: none; }
+  .where em { font-style: normal; opacity: 0.5; margin-left: 4px; }
   .seg { display: flex; padding: 3px; border-radius: 999px; background: var(--surface); }
   .seg button { height: 30px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; color: var(--text-2); }
   .seg button.on { background: var(--surface-2); color: var(--text); }

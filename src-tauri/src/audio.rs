@@ -36,6 +36,7 @@ pub enum Cmd {
     QueueRemove(usize),
     QueueMove { from: usize, to: usize },
     QueueClear,
+    Audio(crate::settings::AudioSettings),
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -52,6 +53,8 @@ pub struct PlayerState {
     pub index: usize,
     /// Wall-clock ms when `pos_ms` was sampled; the UI extrapolates from it.
     pub at: i64,
+    /// Waiting for a network stream to start.
+    pub buffering: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -69,6 +72,13 @@ pub struct SpectrumFrame {
 pub struct Audio {
     tx: Sender<Cmd>,
     pub state: Arc<RwLock<PlayerState>>,
+}
+
+/// A track opened ahead of time for gapless or crossfade.
+struct Prepared {
+    index: usize,
+    track: Track,
+    sample_rate: u32,
 }
 
 impl Audio {
@@ -171,6 +181,14 @@ struct Engine {
     original_queue: Option<Vec<String>>,
     /// Set when the volume changes; persisted shortly after the user stops dragging.
     volume_dirty: Option<Instant>,
+    eq: Arc<crate::eq::EqParams>,
+    fx: crate::settings::AudioSettings,
+    /// Next track already appended to the current player (gapless).
+    prepared: Option<Prepared>,
+    /// Outgoing player during a crossfade, with when the fade started.
+    fading_out: Option<(Player, Instant)>,
+    /// When the current player's fade-in started (crossfade).
+    fading_in: Option<Instant>,
     // play accounting
     started_at: i64,
     listened_ms: u64,
@@ -199,6 +217,11 @@ pub fn start(app: AppHandle, volume: f32) -> Audio {
                     sink,
                     device_lost,
                     volume_dirty: None,
+                    eq: Arc::new(crate::eq::EqParams::default()),
+                    fx: crate::settings::AudioSettings::default(),
+                    prepared: None,
+                    fading_out: None,
+                    fading_in: None,
                     player: None,
                     original_queue: None,
                     started_at: 0,
@@ -288,6 +311,22 @@ impl Engine {
     fn tick(&mut self) {
         let dt = self.last_tick.elapsed().as_millis() as u64;
         self.last_tick = Instant::now();
+        self.ramp();
+        // Gapless hand-over: the prepared source started, the old one is gone.
+        if self.prepared.is_some() && self.player.as_ref().is_some_and(|p| p.len() <= 1) {
+            let prep = self.prepared.take().unwrap();
+            self.account(false);
+            self.ring.sr.store(prep.sample_rate, Ordering::Relaxed);
+            {
+                let mut s = self.state.write();
+                s.duration_ms = prep.track.duration_ms;
+                s.track = Some(prep.track);
+                s.index = prep.index;
+                s.pos_ms = 0;
+            }
+            self.started_at = now_ms();
+            self.emit();
+        }
         let Some(p) = &self.player else { return };
         let playing = !p.is_paused();
         let pos = p.get_pos().as_millis() as u64;
@@ -301,6 +340,91 @@ impl Engine {
         }
         if p.empty() {
             self.on_track_end();
+            return;
+        }
+        if playing {
+            self.maybe_prepare_next(pos);
+        }
+    }
+
+    /// What plays after the current track, honouring repeat.
+    fn next_index(&self) -> Option<usize> {
+        let s = self.state.read();
+        match s.repeat.as_str() {
+            "one" => Some(s.index),
+            _ if s.index + 1 < s.queue.len() => Some(s.index + 1),
+            "all" if !s.queue.is_empty() => Some(0),
+            _ => None,
+        }
+    }
+
+    /// Near the end of a track: start the crossfade, or append the next track for gapless.
+    fn maybe_prepare_next(&mut self, pos: u64) {
+        if self.prepared.is_some() || self.fading_out.is_some() {
+            return;
+        }
+        let dur = self.state.read().duration_ms;
+        if dur < 5000 || pos == 0 {
+            return;
+        }
+        let remaining = dur.saturating_sub(pos);
+        let cf = self.fx.crossfade_ms as u64;
+        let Some(next) = self.next_index() else { return };
+        let spotify_involved = self.state.read().track.as_ref().is_some_and(|t| t.source == "spotify")
+            || self.state.read().queue.get(next).is_some_and(|id| id.starts_with("spotify:"));
+        if cf > 0 && !spotify_involved {
+            if remaining <= cf.min(dur / 3) {
+                // Crossfade: keep the old player running and fade it out while the next fades in.
+                self.account(false);
+                if let Some(old) = self.player.take() {
+                    self.fading_out = Some((old, Instant::now()));
+                }
+                self.load(next, true);
+                if let Some(p) = &self.player {
+                    p.set_volume(0.0);
+                }
+                self.fading_in = Some(Instant::now());
+                self.emit();
+            }
+            return;
+        }
+        if self.fx.gapless && remaining <= 1800 {
+            let id = self.state.read().queue.get(next).cloned();
+            let Some(track) = id.and_then(|id| self.db().track(&id)) else { return };
+            // Only local files: opening a network stream here could stall the audio thread
+            // past the end of the current track. Remote tracks take the regular path.
+            if track.source != "local" {
+                return;
+            }
+            let Ok(dec) = File::open(&track.path).map_err(anyhow::Error::from).and_then(|f| Ok(rodio::Decoder::try_from(f)?)) else { return };
+            let sample_rate = dec.sample_rate().get();
+            if let Some(p) = &self.player {
+                p.append(Tap { inner: crate::eq::Eq::new(dec, self.eq.clone()), ring: self.ring.clone(), acc: 0.0, n: 0, local: Vec::with_capacity(256) });
+                self.prepared = Some(Prepared { index: next, track, sample_rate });
+            }
+        }
+    }
+
+    /// Volume ramps for crossfade (equal-power curve, so the middle doesn't dip).
+    fn ramp(&mut self) {
+        let cf = (self.fx.crossfade_ms.max(1)) as f32;
+        let v = self.state.read().volume;
+        let target = v * v;
+        if let Some((old, t0)) = &self.fading_out {
+            let k = (t0.elapsed().as_millis() as f32 / cf).min(1.0);
+            old.set_volume(target * (k * std::f32::consts::FRAC_PI_2).cos());
+            if k >= 1.0 {
+                self.fading_out = None;
+            }
+        }
+        if let Some(t0) = self.fading_in {
+            let k = (t0.elapsed().as_millis() as f32 / cf).min(1.0);
+            if let Some(p) = &self.player {
+                p.set_volume(target * (k * std::f32::consts::FRAC_PI_2).sin());
+            }
+            if k >= 1.0 {
+                self.fading_in = None;
+            }
         }
     }
 
@@ -336,42 +460,103 @@ impl Engine {
     }
 
     fn load(&mut self, index: usize, autoplay: bool) {
+        self.load_inner(index, autoplay, 0);
+    }
+
+    fn load_inner(&mut self, index: usize, autoplay: bool, depth: usize) {
         let id = match self.state.read().queue.get(index) {
             Some(id) => id.clone(),
             None => return,
         };
         let Some(track) = self.db().track(&id) else { return };
         self.player = None; // dropping the old player stops it immediately
-        let source = File::open(&track.path).map_err(|e| e.to_string()).and_then(|f| rodio::Decoder::try_from(f).map_err(|e| e.to_string()));
-        match source {
-            Ok(dec) => {
-                self.ring.sr.store(dec.sample_rate().get(), Ordering::Relaxed);
-                let player = Player::connect_new(self.sink.mixer());
-                let vol = self.state.read().volume;
-                player.set_volume(vol * vol);
-                player.append(Tap { inner: dec, ring: self.ring.clone(), acc: 0.0, n: 0, local: Vec::with_capacity(256) });
-                if autoplay {
-                    player.play();
-                } else {
-                    player.pause();
+        self.prepared = None;
+        self.fading_in = None;
+        self.app.state::<crate::sources::Sources>().spotify().stop();
+
+        // Show the new track right away (cover, title) even if the network takes a moment.
+        {
+            let mut s = self.state.write();
+            s.duration_ms = track.duration_ms;
+            s.track = Some(track.clone());
+            s.index = index;
+            s.pos_ms = 0;
+            s.playing = false;
+            s.buffering = track.source != "local";
+        }
+        if track.source != "local" {
+            self.emit();
+        }
+
+        // The requested copy first, then other copies of the same recording
+        // (a local file for a Yandex track, SoundCloud for a missing file, …).
+        let mut candidates = vec![track.clone()];
+        candidates.extend(self.db().alternates(&track));
+        let mut last_err = String::new();
+        let mut opened = false;
+        for cand in &candidates {
+            match self.open_source(cand, autoplay) {
+                Ok(()) => {
+                    opened = true;
+                    break;
                 }
-                self.player = Some(player);
-                self.started_at = now_ms();
-                let mut s = self.state.write();
-                s.duration_ms = track.duration_ms;
-                s.track = Some(track);
-                s.index = index;
-                s.pos_ms = 0;
-                s.playing = autoplay;
-            }
-            Err(e) => {
-                let _ = self.app.emit("oto://error", format!("Не удалось открыть «{}»: {e}", track.title));
-                let len = self.state.read().queue.len();
-                if index + 1 < len {
-                    self.load(index + 1, autoplay);
-                }
+                Err(e) => last_err = e.to_string(),
             }
         }
+        self.state.write().buffering = false;
+        if opened {
+            self.started_at = now_ms();
+            self.state.write().playing = autoplay;
+            return;
+        }
+        let _ = self.app.emit("oto://error", format!("Не удалось открыть «{}»: {last_err}", track.title));
+        let len = self.state.read().queue.len();
+        if index + 1 < len && depth < 5 {
+            self.load_inner(index + 1, autoplay, depth + 1);
+        }
+    }
+
+    /// Opens one copy of a track (file or network) and starts it on a fresh player.
+    fn open_source(&mut self, t: &Track, autoplay: bool) -> anyhow::Result<()> {
+        if t.source == "local" {
+            let dec = rodio::Decoder::try_from(File::open(&t.path)?)?;
+            self.start(dec, autoplay);
+            return Ok(());
+        }
+        let src = crate::sources::stream_for(&self.app, t)?;
+        if let crate::providers::StreamSource::Spotify { uri } = &src {
+            let backend = self.app.state::<crate::sources::Sources>().spotify().backend()?;
+            backend.play(uri, 0)?;
+            backend.wait_started(Duration::from_secs(12))?;
+            let source = crate::providers::spotify::SpotifySource { backend, duration: Duration::from_millis(t.duration_ms) };
+            self.start(source, autoplay);
+            return Ok(());
+        }
+        let opened = crate::stream::open(src)?;
+        let mut b = rodio::Decoder::builder().with_data(opened.reader).with_seekable(true).with_coarse_seek(true);
+        if let Some(len) = opened.byte_len {
+            b = b.with_byte_len(len);
+        }
+        if let Some(m) = opened.mime.as_deref() {
+            b = b.with_mime_type(m);
+        }
+        let dec = b.build()?;
+        self.start(dec, autoplay);
+        Ok(())
+    }
+
+    fn start<S: Source + Send + 'static>(&mut self, dec: S, autoplay: bool) {
+        self.ring.sr.store(dec.sample_rate().get(), Ordering::Relaxed);
+        let player = Player::connect_new(self.sink.mixer());
+        let vol = self.state.read().volume;
+        player.set_volume(vol * vol);
+        player.append(Tap { inner: crate::eq::Eq::new(dec, self.eq.clone()), ring: self.ring.clone(), acc: 0.0, n: 0, local: Vec::with_capacity(256) });
+        if autoplay {
+            player.play();
+        } else {
+            player.pause();
+        }
+        self.player = Some(player);
     }
 
     fn handle(&mut self, cmd: Cmd) {
@@ -407,6 +592,7 @@ impl Engine {
                 }
             }
             Cmd::JumpTo(i) => {
+                self.fading_out = None;
                 self.account(true);
                 self.load(i, true);
             }
@@ -421,12 +607,14 @@ impl Engine {
                 }
             }
             Cmd::Pause => {
+                self.fading_out = None;
                 if let Some(p) = &self.player {
                     p.pause();
                     self.state.write().playing = false;
                 }
             }
             Cmd::Next => {
+                self.fading_out = None;
                 self.account(true);
                 let (idx, len, repeat, playing) = {
                     let s = self.state.read();
@@ -535,6 +723,10 @@ impl Engine {
                     };
                 }
             }
+            Cmd::Audio(a) => {
+                self.eq.set(a.eq_enabled, a.eq_preamp, &a.eq_gains);
+                self.fx = a;
+            }
             Cmd::QueueClear => {
                 // Keep only what is playing now.
                 let mut s = self.state.write();
@@ -560,6 +752,9 @@ impl Engine {
         let v = v.clamp(0.0, 1.0);
         self.state.write().volume = v;
         self.volume_dirty = Some(Instant::now());
+        if self.fading_in.is_some() {
+            return; // the ramp applies the new level
+        }
         if let Some(p) = &self.player {
             // Squared curve: linear sliders feel like they do nothing in the top half.
             p.set_volume(v * v);

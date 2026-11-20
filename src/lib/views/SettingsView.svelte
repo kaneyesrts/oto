@@ -1,8 +1,9 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
-  import { app, saveSettings } from "../store.svelte";
+  import { app, saveSettings, refreshSources } from "../store.svelte";
   import { api, type Hotkeys, type Settings, type ThemeId } from "../api";
   import { FolderPlus, Refresh, X } from "../icons";
+  import Equalizer from "../components/Equalizer.svelte";
 
   const s = $derived(app.settings!);
 
@@ -15,6 +16,7 @@
   ];
 
   const set = (f: (x: Settings) => void) => saveSettings(f);
+  refreshSources();
 
   async function addFolder() {
     const dir = await open({ directory: true, multiple: false, title: "Папка с музыкой" });
@@ -103,6 +105,16 @@
   </section>
 
   <section>
+    <h2>Звук</h2>
+    <div class="opts">
+      {@render toggle(s.audio.gapless, () => set((x) => (x.audio.gapless = !x.audio.gapless)), "Без пауз между треками", "Альбомы с непрерывным звуком играют слитно (для файлов)")}
+      {@render slider(s.audio.crossfadeMs / 1000, 0, 12, 0.5, (v) => set((x) => (x.audio.crossfadeMs = Math.round(v * 1000))), "Кроссфейд", (v) => (v ? `${v} с` : "выкл"))}
+      {@render toggle(s.audio.eqEnabled, () => set((x) => (x.audio.eqEnabled = !x.audio.eqEnabled)), "Эквалайзер", "Двойной клик по полосе сбрасывает её")}
+    </div>
+    <div class="eqwrap"><Equalizer /></div>
+  </section>
+
+  <section>
     <h2>Лирика</h2>
     <div class="opts">
       {@render toggle(s.lyrics.online, () => set((x) => (x.lyrics.online = !x.lyrics.online)), "Искать в интернете", "LRCLIB, если в файле и рядом с ним текста нет")}
@@ -152,13 +164,26 @@
 
   <section>
     <h2>Источники</h2>
+    <p class="muted hint">Музыка из сервисов играет через тот же движок: визуализация, лирика, эквалайзер и статистика работают одинаково. Одна и та же песня из разных источников показывается один раз, а при недоступности источника играет другая копия.</p>
     <div class="sources">
-      <div class="src"><b>Локальные файлы</b><span class="ok">подключено</span></div>
-      <div class="src"><b>LRCLIB</b><span class="ok">тексты</span></div>
-      <div class="src"><b>Яндекс Музыка</b><span class="faint">следующий этап</span></div>
-      <div class="src"><b>SoundCloud</b><span class="faint">следующий этап</span></div>
-      <div class="src"><b>Spotify</b><span class="faint">этап 3, нужен Premium</span></div>
+      <div class="src"><b>Локальные файлы</b><span class="ok">{s.folders.length} {s.folders.length === 1 ? "папка" : "папки"}</span></div>
+      {#each app.sources as src (src.id)}
+        <div class="src">
+          <b>{src.name}</b>
+          {#if src.connected}
+            <span class="ok">{src.account ? `Вход: ${src.account}` : "Подключено"}</span>
+            <div class="srow">
+              <button class="mini-btn" onclick={() => api.sourceImportLiked(src.id)}>Импорт избранного</button>
+              <button class="mini-btn ghost" onclick={() => api.sourceLogout(src.id)}>Выйти</button>
+            </div>
+          {:else}
+            <span class="faint">{src.worksAnonymously ? "Поиск и публичные треки без входа" : "Нужен вход"}</span>
+            <div class="srow"><button class="mini-btn" onclick={() => api.sourceLogin(src.id)}>Войти</button></div>
+          {/if}
+        </div>
+      {/each}
     </div>
+    <p class="faint note">API Яндекс Музыки и SoundCloud неофициальные и могут меняться. Токены хранятся только на этом компьютере.</p>
   </section>
 </div>
 
@@ -207,4 +232,10 @@
   .src { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 14px; background: var(--surface); font-size: 12.5px; }
   .src b { font-size: 14px; }
   .ok { color: var(--accent); }
+  .eqwrap { margin-top: 14px; }
+  .srow { display: flex; gap: 6px; margin-top: 8px; }
+  .mini-btn { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--text); color: var(--bg); }
+  .mini-btn.ghost { background: transparent; color: var(--text-2); border: 1px solid var(--line); }
+  :root[data-theme="paper"] .mini-btn { border-radius: 0; }
+  .note { font-size: 12px; margin-top: 12px; }
 </style>

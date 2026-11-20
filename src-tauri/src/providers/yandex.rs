@@ -7,7 +7,6 @@
 //! * Without a Plus subscription the stream endpoints only offer 30 s previews.
 
 // Nothing calls into `providers` yet; drop this once the provider is wired into commands.
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::OnceLock;

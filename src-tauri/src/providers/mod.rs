@@ -2,6 +2,7 @@
 //! decode, so visuals, lyrics sync, EQ and stats work the same for every source.
 
 pub mod soundcloud;
+pub mod spotify;
 pub mod yandex;
 
 use serde::{Deserialize, Serialize};
@@ -33,9 +34,12 @@ pub enum StreamSource {
     /// An HLS media playlist whose segments, concatenated, form a decodable stream
     /// (e.g. MPEG audio segments). The engine downloads segments in order.
     Hls { playlist_url: String, headers: Vec<(String, String)>, mime: Option<String> },
+    /// Played by the librespot session (Spotify Premium), not over HTTP.
+    Spotify { uri: String },
 }
 
 pub trait Provider: Send + Sync {
+    #[allow(dead_code)]
     fn id(&self) -> &'static str;
     /// True when the provider has the credentials it needs for full-length playback.
     fn authorized(&self) -> bool;

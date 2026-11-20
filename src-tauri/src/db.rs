@@ -24,6 +24,45 @@ pub struct Track {
     pub liked: bool,
     pub added_at: i64,
     pub source: String,
+    /// Id at the remote service ("" for local files).
+    #[serde(default)]
+    pub remote_id: String,
+    /// In the user's library. Remote tracks played from search are stored with `saved = false`.
+    #[serde(default = "yes")]
+    pub saved: bool,
+    /// Other copies of the same recording (another source, or a duplicate file), best first.
+    #[serde(default)]
+    pub alts: Vec<String>,
+    /// A better copy of this recording exists; lists show that one instead.
+    #[serde(default)]
+    pub hidden: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// Rank of a source when several copies of one song exist: local files win (no network,
+/// best quality), then services in order of typical quality.
+pub fn source_rank(s: &str) -> u8 {
+    match s {
+        "local" => 0,
+        "yandex" => 1,
+        "spotify" => 2,
+        "soundcloud" => 3,
+        _ => 9,
+    }
+}
+
+/// Key that is equal for the same song across sources: main artist + title without
+/// "(feat. …)", "- Remastered 2011" and punctuation.
+pub fn match_key(artist: &str, title: &str) -> String {
+    let norm = |s: &str| s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>();
+    format!(
+        "{}|{}",
+        norm(&crate::lyrics::lrclib::main_artist(artist)),
+        norm(&crate::lyrics::lrclib::clean_title(title))
+    )
 }
 
 pub fn now_ms() -> i64 {
@@ -94,7 +133,93 @@ impl Db {
             );
             "#,
         )?;
-        Ok(Db(Mutex::new(conn)))
+        // Columns added after the first release.
+        for (col, def) in [
+            ("remote_id", "TEXT NOT NULL DEFAULT ''"),
+            ("saved", "INTEGER NOT NULL DEFAULT 1"),
+            ("match_key", "TEXT NOT NULL DEFAULT ''"),
+        ] {
+            let has: bool = conn
+                .prepare("SELECT 1 FROM pragma_table_info('tracks') WHERE name = ?")?
+                .exists([col])?;
+            if !has {
+                conn.execute_batch(&format!("ALTER TABLE tracks ADD COLUMN {col} {def}"))?;
+            }
+        }
+        conn.execute_batch("CREATE INDEX IF NOT EXISTS tracks_match ON tracks(match_key);")?;
+        let db = Db(Mutex::new(conn));
+        db.backfill_match_keys();
+        Ok(db)
+    }
+
+    fn backfill_match_keys(&self) {
+        let c = self.0.lock();
+        let rows: Vec<(String, String, String)> = {
+            let mut st = c.prepare("SELECT id, artist, title FROM tracks WHERE match_key = ''").unwrap();
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().filter_map(Result::ok).collect()
+        };
+        for (id, a, t) in rows {
+            let _ = c.execute("UPDATE tracks SET match_key = ? WHERE id = ?", params![match_key(&a, &t), id]);
+        }
+    }
+
+    /// Inserts or refreshes tracks from a streaming service. `saved` only ever upgrades
+    /// (playing a search result never removes a track from the library).
+    pub fn upsert_remote(&self, items: &[Track]) {
+        let mut c = self.0.lock();
+        let tx = c.transaction().unwrap();
+        {
+            let mut st = tx
+                .prepare(
+                    "INSERT INTO tracks (id, path, title, artist, album, album_artist, duration_ms, track_no, year, genre, cover, palette, mtime, added_at, source, remote_id, saved, match_key, liked)
+                     VALUES (?1, ?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?10, 0, ?11, ?12, ?13, ?14, ?15, ?16)
+                     ON CONFLICT(id) DO UPDATE SET title=?2, artist=?3, album=?4, album_artist=?5, duration_ms=?6, year=?7, genre=?8,
+                       cover=COALESCE(?9, cover), palette=CASE WHEN ?9 IS NULL THEN palette ELSE ?10 END,
+                       saved=MAX(saved, ?14), liked=MAX(liked, ?16), match_key=?15",
+                )
+                .unwrap();
+            for t in items {
+                let _ = st.execute(params![
+                    t.id,
+                    t.title,
+                    t.artist,
+                    t.album,
+                    t.album_artist,
+                    t.duration_ms as i64,
+                    t.year,
+                    t.genre,
+                    t.cover,
+                    serde_json::to_string(&t.palette).unwrap_or_else(|_| "[]".into()),
+                    t.added_at,
+                    t.source,
+                    t.remote_id,
+                    t.saved as i32,
+                    match_key(&t.artist, &t.title),
+                    t.liked as i32,
+                ]);
+            }
+        }
+        let _ = tx.commit();
+    }
+
+    pub fn set_saved(&self, id: &str, saved: bool) {
+        let c = self.0.lock();
+        let _ = c.execute("UPDATE tracks SET saved = ? WHERE id = ?", params![saved as i32, id]);
+    }
+
+    /// Other copies of the same recording: same match key, duration within 3 s, best first.
+    pub fn alternates(&self, t: &Track) -> Vec<Track> {
+        let key = match_key(&t.artist, &t.title);
+        let c = self.0.lock();
+        let mut st = c.prepare("SELECT * FROM tracks WHERE match_key = ? AND id != ?").unwrap();
+        let mut v: Vec<Track> = st
+            .query_map(params![key, t.id], row_to_track)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|o| (o.duration_ms as i64 - t.duration_ms as i64).abs() <= 3000)
+            .collect();
+        v.sort_by_key(|o| source_rank(&o.source));
+        v
     }
 
     pub fn all_tracks(&self) -> Vec<Track> {
@@ -102,7 +227,9 @@ impl Db {
         let mut st = c
             .prepare("SELECT * FROM tracks ORDER BY album_artist COLLATE NOCASE, album COLLATE NOCASE, track_no, title")
             .unwrap();
-        st.query_map([], row_to_track).unwrap().filter_map(Result::ok).collect()
+        let mut all: Vec<Track> = st.query_map([], row_to_track).unwrap().filter_map(Result::ok).collect();
+        group_copies(&mut all);
+        all
     }
 
     pub fn track(&self, id: &str) -> Option<Track> {
@@ -121,10 +248,10 @@ impl Db {
         {
             let mut st = tx
                 .prepare(
-                    "INSERT INTO tracks (id, path, title, artist, album, album_artist, duration_ms, track_no, year, genre, cover, palette, mtime, added_at, source)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                    "INSERT INTO tracks (id, path, title, artist, album, album_artist, duration_ms, track_no, year, genre, cover, palette, mtime, added_at, source, match_key)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
                      ON CONFLICT(id) DO UPDATE SET title=?3, artist=?4, album=?5, album_artist=?6, duration_ms=?7,
-                       track_no=?8, year=?9, genre=?10, cover=?11, palette=?12, mtime=?13",
+                       track_no=?8, year=?9, genre=?10, cover=?11, palette=?12, mtime=?13, match_key=?16",
                 )
                 .unwrap();
             for (t, mtime) in items {
@@ -144,6 +271,7 @@ impl Db {
                     mtime,
                     t.added_at,
                     t.source,
+                    match_key(&t.artist, &t.title),
                 ]);
             }
         }
@@ -304,6 +432,39 @@ impl Db {
     }
 }
 
+/// Marks duplicates of one recording: the best copy (saved first, then by source rank)
+/// gets the others in `alts`, the others get `hidden`.
+fn group_copies(all: &mut [Track]) {
+    use std::collections::HashMap;
+    let mut by_key: HashMap<String, Vec<usize>> = HashMap::new();
+    for (i, t) in all.iter().enumerate() {
+        by_key.entry(match_key(&t.artist, &t.title)).or_default().push(i);
+    }
+    for idx in by_key.into_values().filter(|v| v.len() > 1) {
+        // Cluster by duration so a live version and the studio cut stay separate.
+        let mut idx = idx;
+        idx.sort_by_key(|&i| all[i].duration_ms);
+        let mut clusters: Vec<Vec<usize>> = vec![];
+        for i in idx {
+            match clusters.last_mut() {
+                Some(c) if all[i].duration_ms - all[*c.last().unwrap()].duration_ms <= 3000 => c.push(i),
+                _ => clusters.push(vec![i]),
+            }
+        }
+        for mut c in clusters.into_iter().filter(|c| c.len() > 1) {
+            c.sort_by_key(|&i| (!all[i].saved, source_rank(&all[i].source)));
+            let best = c[0];
+            let alts: Vec<String> = c[1..].iter().map(|&i| all[i].id.clone()).collect();
+            let any_liked = c.iter().any(|&i| all[i].liked);
+            for &i in &c[1..] {
+                all[i].hidden = true;
+            }
+            all[best].alts = alts;
+            all[best].liked = any_liked;
+        }
+    }
+}
+
 fn row_to_track(r: &Row) -> rusqlite::Result<Track> {
     let palette: String = r.get("palette")?;
     Ok(Track {
@@ -322,5 +483,9 @@ fn row_to_track(r: &Row) -> rusqlite::Result<Track> {
         liked: r.get::<_, i64>("liked")? != 0,
         added_at: r.get("added_at")?,
         source: r.get("source")?,
+        remote_id: r.get("remote_id")?,
+        saved: r.get::<_, i64>("saved")? != 0,
+        alts: vec![],
+        hidden: false,
     })
 }

@@ -18,6 +18,21 @@ export interface Track {
   liked: boolean;
   addedAt: number;
   source: string;
+  remoteId?: string;
+  /** In the library (remote tracks played from search are not, until saved). */
+  saved: boolean;
+  /** Other copies of the same recording, best first. */
+  alts?: string[];
+  /** A better copy exists; lists show that one. */
+  hidden?: boolean;
+}
+
+export interface SourceStatus {
+  id: string;
+  name: string;
+  connected: boolean;
+  worksAnonymously: boolean;
+  account?: string | null;
 }
 
 export interface PlayerState {
@@ -31,6 +46,7 @@ export interface PlayerState {
   queue: string[];
   index: number;
   at: number;
+  buffering?: boolean;
 }
 
 export interface SpectrumFrame {
@@ -95,6 +111,16 @@ export interface Settings {
   visual: { particles: boolean; intensity: number; quality: "low" | "high" };
   widget: WidgetSettings;
   hotkeys: Hotkeys;
+  audio: AudioSettings;
+}
+
+export interface AudioSettings {
+  crossfadeMs: number;
+  gapless: boolean;
+  eqEnabled: boolean;
+  eqPreamp: number;
+  eqGains: number[];
+  eqPreset: string;
 }
 
 export interface Stats {
@@ -151,6 +177,13 @@ export const api = {
   showMain: () => invoke("show_main"),
   hideFlyout: () => invoke("hide_flyout"),
   toggleWidget: () => invoke("toggle_widget"),
+  sources: () => invoke<SourceStatus[]>("sources_status"),
+  sourceLogin: (id: string) => invoke("source_login", { id }),
+  sourceLogout: (id: string) => invoke("source_logout", { id }),
+  sourceSearch: (id: string, query: string) => invoke<Track[]>("source_search", { id, query }),
+  sourceStore: (tracks: Track[], saved: boolean) => invoke("source_store", { tracks, saved }),
+  sourceImportLiked: (id: string) => invoke("source_import_liked", { id }),
+  trackSetSaved: (id: string, saved: boolean) => invoke("track_set_saved", { id, saved }),
   playlists: () => invoke<Playlist[]>("playlists"),
   playlistTracks: (id: number) => invoke<string[]>("playlist_tracks", { id }),
   playlistCreate: (name: string, ids?: string[]) => invoke<number>("playlist_create", { name, ids }),
@@ -163,7 +196,7 @@ export const api = {
 const coverCache = new Map<string, string>();
 export function coverUrl(path?: string | null): string | null {
   if (!path) return null;
-  if (path.startsWith("data:")) return path; // dev mock covers
+  if (path.startsWith("data:") || path.startsWith("http")) return path; // mock / not yet cached
   let u = coverCache.get(path);
   if (!u) {
     u = convertFileSrc(path);
@@ -194,3 +227,5 @@ export function plural(n: number, one: string, few: string, many: string) {
   if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
   return many;
 }
+
+export const SOURCE_LABEL: Record<string, string> = { local: "Файл", yandex: "Яндекс", soundcloud: "SoundCloud", spotify: "Spotify" };

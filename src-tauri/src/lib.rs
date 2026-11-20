@@ -1,9 +1,13 @@
 mod audio;
 mod db;
+mod eq;
+mod fmp4;
 mod library;
 mod providers;
 mod lyrics;
 mod settings;
+mod sources;
+mod stream;
 mod shell;
 mod stats;
 
@@ -220,7 +224,8 @@ async fn get_lyrics(app: AppHandle, id: String, force: Option<bool>) -> Option<l
         if force.unwrap_or(false) {
             db.drop_lyrics_cache(&id);
         }
-        Some(lyrics::resolve(&db, &track, online, align, force.unwrap_or(false)))
+        let svc = |t: &Track| sources::lyrics_for(&app, t);
+        Some(lyrics::resolve(&db, &track, online, align, force.unwrap_or(false), &svc))
     })
     .await
     .ok()
@@ -276,7 +281,9 @@ pub fn run() {
             app.manage(Db::open(&data.join("library.db"))?);
             app.manage(AppState { settings: RwLock::new(s.clone()), settings_path, cover_dir: cache.join("covers") });
             app.manage(shell::Shell::default());
+            app.manage(sources::Sources::load(cfg.join("credentials.json")));
             app.manage(audio::start(h.clone(), volume));
+            app.state::<Audio>().send(Cmd::Audio(s.audio.clone()));
 
             shell::setup_tray(&h)?;
             shell::create_flyout(&h)?;
@@ -329,6 +336,13 @@ pub fn run() {
             playlist_delete,
             playlist_add,
             playlist_set,
+            sources::sources_status,
+            sources::source_login,
+            sources::source_logout,
+            sources::source_search,
+            sources::source_store,
+            sources::source_import_liked,
+            sources::track_set_saved,
         ])
         .build(tauri::generate_context!())
         .expect("error while building oto")

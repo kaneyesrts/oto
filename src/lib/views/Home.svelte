@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { app, player, trackById } from "../store.svelte";
+  import { app, libraryTracks, player, trackById } from "../store.svelte";
   import { api, coverUrl, fmtDuration, plural, type Stats } from "../api";
   import { albums } from "../groups";
   import { glass } from "../glass";
@@ -18,7 +18,7 @@
   })();
   const dateLine = now.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
 
-  const recent = $derived(albums(app.tracks).sort((a, b) => b.addedAt - a.addedAt).slice(0, 10));
+  const recent = $derived(albums(libraryTracks()).sort((a, b) => b.addedAt - a.addedAt).slice(0, 10));
   const liquid = $derived(app.settings?.theme === "liquid");
   const resume = $derived(app.player.track);
   const upNext = $derived(
@@ -29,8 +29,8 @@
 
   function mix() {
     // Liked and frequently played tracks first, padded with the rest of the library.
-    const fav = new Set([...app.tracks.filter((t) => t.liked).map((t) => t.id), ...(stats?.topTracks.map((x) => x.track.id) ?? [])]);
-    const pool = app.tracks.map((t) => ({ id: t.id, w: Math.random() + (fav.has(t.id) ? 0.8 : 0) }));
+    const fav = new Set([...libraryTracks().filter((t) => t.liked).map((t) => t.id), ...(stats?.topTracks.map((x) => x.track.id) ?? [])]);
+    const pool = libraryTracks().map((t) => ({ id: t.id, w: Math.random() + (fav.has(t.id) ? 0.8 : 0) }));
     pool.sort((a, b) => b.w - a.w);
     player.playList(pool.slice(0, 60).map((p) => p.id), 0);
   }
@@ -51,7 +51,7 @@
     </header>
   {/if}
 
-  {#if !app.tracks.length}
+  {#if !libraryTracks().length}
     <section class="onboard panel" use:glass={{ radius: 30, enabled: liquid }}>
       <div>
         <h2>Начнём с вашей музыки</h2>
@@ -78,7 +78,7 @@
           <div class="txt">
             <div class="eyebrow">Начать</div>
             <div class="big">Случайный микс</div>
-            <div class="muted">{app.tracks.length} {plural(app.tracks.length, "трек", "трека", "треков")} в библиотеке</div>
+            <div class="muted">{libraryTracks().length} {plural(libraryTracks().length, "трек", "трека", "треков")} в библиотеке</div>
           </div>
         </button>
       {/if}

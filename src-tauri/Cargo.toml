@@ -46,6 +46,9 @@ tauri-plugin-single-instance = "2.5.5"
 sha2 = "0.11"
 hmac = "0.13.0"
 md-5 = "0.11.0"
+librespot-core = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-playback = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-oauth = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

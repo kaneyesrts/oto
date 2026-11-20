@@ -37,7 +37,7 @@ const tracks: Track[] = titles.map((title, i) => {
     id: `t${i}`, path: `C:/Music/${title}.flac`, title, artist: artists[a], album, albumArtist: artists[a],
     durationMs: 150_000 + ((i * 37_123) % 140_000), trackNo: (i % 9) + 1, year: 2016 + (i % 9),
     genre: ["Инди", "Электроника", "Пост-рок", "Поп"][i % 4], cover: cover(palettes[pi], pi * 7 + albs.indexOf(album)),
-    palette: palettes[pi], liked: i % 5 === 0, addedAt: Date.now() - i * 86400000, source: "local",
+    palette: palettes[pi], liked: i % 5 === 0, addedAt: Date.now() - i * 86400000, source: "local", saved: true,
   };
 });
 
@@ -47,6 +47,7 @@ const settings: Settings = {
   lyrics: { fontScale: 1, depthBlur: true, autoAlign: true, online: true },
   visual: { particles: true, intensity: 1, quality: "high" },
   widget: { enabled: false, layer: "overlay", style: "compact", opacity: 0.92, blur: 24, scale: 1, clickThrough: false, glow: true, particles: false, spectrum: true },
+  audio: { crossfadeMs: 0, gapless: true, eqEnabled: false, eqPreamp: 0, eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqPreset: "flat" },
   hotkeys: { playPause: "Ctrl+Alt+Space", next: "Ctrl+Alt+Right", prev: "Ctrl+Alt+Left", volumeUp: "Ctrl+Alt+Up", volumeDown: "Ctrl+Alt+Down", like: "Ctrl+Alt+L", toggleWidget: "Ctrl+Alt+W", toggleClickThrough: "Ctrl+Alt+O", seekForward: "Ctrl+Alt+Shift+Right", seekBack: "Ctrl+Alt+Shift+Left" },
 };
 
@@ -103,6 +104,12 @@ export function installMock() {
           daily: Array.from({ length: 30 }, (_, i) => ({ day: new Date(Date.now() - (29 - i) * 86400000).toISOString().slice(0, 10), ms: Math.random() * 3 * 3600000 })),
           rising: { artist: "Полынь", plays: 18, ms: 2.4 * 3600000, cover: tracks[2].cover },
         };
+      case "sources_status": return [
+        { id: "yandex", name: "Яндекс Музыка", connected: true, worksAnonymously: false, account: "demo" },
+        { id: "soundcloud", name: "SoundCloud", connected: false, worksAnonymously: true, account: null },
+      ];
+      case "source_search": return tracks.slice(0, 8).map((t, i) => ({ ...t, id: `${args.id}:${100 + i}`, source: args.id, saved: i % 3 === 0 }));
+      case "source_store": for (const t of args.tracks) if (!tracks.find((x) => x.id === t.id)) tracks.push({ ...t, saved: args.saved }); emit("oto://library", 0); return null;
       case "playlists": return plMeta();
       case "playlist_tracks": return lists.find((l) => l.id === args.id)?.ids ?? [];
       case "playlist_create": { const id = Date.now(); lists.unshift({ id, name: args.name, ids: args.ids ?? [], updatedAt: Date.now() }); plChanged(); return id; }

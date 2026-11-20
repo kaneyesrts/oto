@@ -133,6 +133,10 @@ fn read_track(path: &Path, cover_dir: &Path) -> Option<Track> {
         liked: false,
         added_at: now_ms(),
         source: "local".into(),
+        remote_id: String::new(),
+        saved: true,
+        alts: vec![],
+        hidden: false,
     })
 }
 

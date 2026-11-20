@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, type View } from "../store.svelte";
+  import { app, libraryTracks, type View } from "../store.svelte";
   import { House, Library, Disc3, Users, Heart, Chart, Settings } from "../icons";
   import { plural, coverUrl, api } from "../api";
   import { Plus } from "../icons";
@@ -14,9 +14,9 @@
     { id: "stats", label: "Статистика", icon: Chart },
   ];
 
-  const liked = $derived(app.tracks.filter((t) => t.liked).length);
+  const liked = $derived(libraryTracks().filter((t) => t.liked).length);
   // Recently added albums: real navigation, and the covers bring colour into the rail.
-  const recent = $derived(albums(app.tracks).sort((a, b) => b.addedAt - a.addedAt).slice(0, 5));
+  const recent = $derived(albums(libraryTracks()).sort((a, b) => b.addedAt - a.addedAt).slice(0, 5));
 
   async function newPlaylist() {
     const n = app.playlists.length + 1;
@@ -75,7 +75,7 @@
         <div class="faint num">{app.scan.done} / {app.scan.total}</div>
       </div>
     {:else}
-      <div class="faint count">{app.tracks.length} {plural(app.tracks.length, "трек", "трека", "треков")}</div>
+      <div class="faint count">{libraryTracks().length} {plural(libraryTracks().length, "трек", "трека", "треков")}</div>
     {/if}
     <button class="item" class:active={app.view === "settings"} onclick={() => go("settings")}>
       <Settings size={17} strokeWidth={1.8} />

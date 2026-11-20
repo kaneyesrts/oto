@@ -17,6 +17,26 @@ pub struct Settings {
     pub visual: VisualSettings,
     pub widget: WidgetSettings,
     pub hotkeys: Hotkeys,
+    pub audio: AudioSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AudioSettings {
+    /// Overlap between tracks, ms. 0 = off.
+    pub crossfade_ms: u32,
+    /// Start the next track sample-accurately after the current one (albums without gaps).
+    pub gapless: bool,
+    pub eq_enabled: bool,
+    pub eq_preamp: f32,
+    /// dB for 31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k Hz.
+    pub eq_gains: Vec<f32>,
+    pub eq_preset: String,
+}
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self { crossfade_ms: 0, gapless: true, eq_enabled: false, eq_preamp: 0.0, eq_gains: vec![0.0; 10], eq_preset: "flat".into() }
+    }
 }
 
 impl Default for Settings {
@@ -33,6 +53,7 @@ impl Default for Settings {
             visual: VisualSettings::default(),
             widget: WidgetSettings::default(),
             hotkeys: Hotkeys::default(),
+            audio: AudioSettings::default(),
         }
     }
 }

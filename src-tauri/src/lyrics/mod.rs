@@ -53,7 +53,10 @@ struct Candidate {
     instrumental: bool,
 }
 
-pub fn resolve(db: &Db, track: &Track, online: bool, auto_align: bool, force: bool) -> LyricsDoc {
+/// Lyrics from streaming services: (text, duration of that recording, label, same recording).
+pub type ServiceLyrics<'a> = &'a dyn Fn(&Track) -> Option<(String, Option<u64>, &'static str, bool)>;
+
+pub fn resolve(db: &Db, track: &Track, online: bool, auto_align: bool, force: bool, services: ServiceLyrics) -> LyricsDoc {
     if !force {
         if let Some((json, at)) = db.lyrics_cached(&track.id) {
             if let Ok(mut doc) = serde_json::from_str::<LyricsDoc>(&json) {
@@ -68,9 +71,20 @@ pub fn resolve(db: &Db, track: &Track, online: bool, auto_align: bool, force: bo
 
     let mut cands: Vec<Candidate> = vec![];
     let path = Path::new(&track.path);
+    let local = track.source == "local";
+
+    // 0. A streaming track's own service: same recording, timing needs no fitting.
+    if !local && online {
+        if let Some((text, dur, label, same)) = services(track) {
+            push_text(&mut cands, label, &text, dur, same);
+        }
+    }
 
     // 1. Sidecar .lrc / .txt
     for ext in ["lrc", "LRC", "txt"] {
+        if !local {
+            break;
+        }
         let p = path.with_extension(ext);
         if let Ok(bytes) = std::fs::read(&p) {
             let text = String::from_utf8_lossy(&bytes).to_string();
@@ -79,7 +93,7 @@ pub fn resolve(db: &Db, track: &Track, online: bool, auto_align: bool, force: bo
         }
     }
     // 2. Embedded in tags
-    if !has_synced(&cands) {
+    if local && !has_synced(&cands) {
         if let Ok(tagged) = lofty::read_from_path(path) {
             for tag in tagged.tags() {
                 for key in [ItemKey::Lyrics, ItemKey::UnsyncLyrics] {
@@ -104,6 +118,13 @@ pub fn resolve(db: &Db, track: &Track, online: bool, auto_align: bool, force: bo
                     push_text(&mut cands, "LRCLIB", p, dur, false);
                 }
             }
+        }
+    }
+
+    // 4. Another service that has the same song (local files, SoundCloud uploads).
+    if online && local && !has_synced(&cands) {
+        if let Some((text, dur, label, same)) = services(track) {
+            push_text(&mut cands, label, &text, dur, same);
         }
     }
 

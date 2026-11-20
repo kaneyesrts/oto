@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, player } from "../store.svelte";
+  import { app, libraryTracks, player } from "../store.svelte";
   import { coverUrl, fmtDuration, plural } from "../api";
   import { albums, artists } from "../groups";
   import TrackList from "../components/TrackList.svelte";
@@ -7,8 +7,8 @@
 
   let { mode = "albums" }: { mode?: "albums" | "artists" } = $props();
 
-  const all = $derived(albums(app.tracks));
-  const arts = $derived(artists(app.tracks));
+  const all = $derived(albums(libraryTracks()));
+  const arts = $derived(artists(libraryTracks()));
   const album = $derived(app.focus?.kind === "album" ? all.find((a) => a.key === app.focus!.key) : null);
   const artist = $derived(app.focus?.kind === "artist" ? arts.find((a) => a.name === app.focus!.key) : null);
   const artistAlbums = $derived(artist ? all.filter((a) => a.artist === artist.name) : []);

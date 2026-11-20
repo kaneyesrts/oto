@@ -121,6 +121,9 @@ pub fn apply_settings(app: &AppHandle, old: &Settings, new: &Settings) -> Vec<St
         errors = register_hotkeys(app, new);
     }
     apply_widget(app, new);
+    if old.audio != new.audio {
+        app.state::<Audio>().send(Cmd::Audio(new.audio.clone()));
+    }
     let _ = app.emit("oto://settings", new);
     errors
 }
