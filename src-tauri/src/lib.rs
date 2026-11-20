@@ -1,6 +1,7 @@
 mod audio;
 mod db;
 mod library;
+mod providers;
 mod lyrics;
 mod settings;
 mod shell;
