@@ -1,9 +1,9 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, type LyricsDoc, type PlayerState, type Settings, type SpectrumFrame, type Track } from "./api";
+import { api, type LyricsDoc, type PlayerState, type Playlist, type Settings, type SpectrumFrame, type Track } from "./api";
 import { applyPalette } from "./color";
 
-export type View = "home" | "library" | "albums" | "artists" | "liked" | "stats" | "settings";
+export type View = "home" | "library" | "albums" | "artists" | "liked" | "stats" | "settings" | "playlist";
 
 const emptyPlayer: PlayerState = {
   track: null, playing: false, posMs: 0, durationMs: 0, volume: 0.8,
@@ -24,7 +24,10 @@ export const app = $state({
   lyricsLoading: false,
   toast: null as null | { text: string; at: number },
   /** Album or artist opened from a grid. */
-  focus: null as null | { kind: "album" | "artist"; key: string },
+  focus: null as null | { kind: "album" | "artist" | "playlist"; key: string },
+  playlists: [] as Playlist[],
+  /** Context menu for one or more tracks, opened by right click or the ⋯ button. */
+  menu: null as null | { x: number; y: number; ids: string[]; playlistId?: number; index?: number },
   fullscreen: false,
 });
 
@@ -91,6 +94,10 @@ export async function loadLyrics(force = false) {
   }
 }
 
+export async function refreshPlaylists() {
+  app.playlists = await api.playlists();
+}
+
 export async function refreshTracks() {
   app.tracks = await api.tracks();
   reindex();
@@ -128,6 +135,9 @@ export const player = {
     const next = order[(order.indexOf(app.player.repeat) + 1) % 3];
     api.player({ type: "repeat", mode: next });
   },
+  queueRemove(index: number) { api.player({ type: "queueRemove", index }); },
+  queueMove(from: number, to: number) { api.player({ type: "queueMove", from, to }); },
+  queueClear() { api.player({ type: "queueClear" }); },
   enqueue(ids: string[]) { api.player({ type: "enqueue", ids }); toast("Добавлено в очередь"); },
   playNext(ids: string[]) { api.player({ type: "playNext", ids }); toast("Сыграет следующим"); },
   jumpTo(index: number) { api.player({ type: "jumpTo", index }); },
@@ -176,6 +186,8 @@ export async function init(withLibrary: boolean) {
       if (e.payload.finished) setTimeout(() => (app.scan = null), 1500);
     });
     await listen("oto://library", () => refreshTracks());
+    await listen("oto://playlists", () => refreshPlaylists());
+    await refreshPlaylists();
   }
   if (app.player.track) loadLyrics();
   if (!ticking) { ticking = true; requestAnimationFrame(tick); }

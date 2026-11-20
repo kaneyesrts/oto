@@ -1,7 +1,8 @@
 <script lang="ts">
   import { app, type View } from "../store.svelte";
   import { House, Library, Disc3, Users, Heart, Chart, Settings } from "../icons";
-  import { plural, coverUrl } from "../api";
+  import { plural, coverUrl, api } from "../api";
+  import { Plus } from "../icons";
   import { albums } from "../groups";
 
   const items: { id: View; label: string; icon: any }[] = [
@@ -16,6 +17,13 @@
   const liked = $derived(app.tracks.filter((t) => t.liked).length);
   // Recently added albums: real navigation, and the covers bring colour into the rail.
   const recent = $derived(albums(app.tracks).sort((a, b) => b.addedAt - a.addedAt).slice(0, 5));
+
+  async function newPlaylist() {
+    const n = app.playlists.length + 1;
+    const id = await api.playlistCreate(`Плейлист ${n}`);
+    app.view = "playlist";
+    app.focus = { kind: "playlist", key: String(id) };
+  }
 
   function go(v: View) {
     app.view = v;
@@ -32,6 +40,18 @@
         <span>{it.label}</span>
         {#if it.id === "liked" && liked}<em class="num">{liked}</em>{/if}
       </button>
+    {/each}
+  </div>
+
+  <div class="group">
+    <div class="eyebrow row-h">Плейлисты <button class="add" onclick={newPlaylist} aria-label="Новый плейлист" title="Новый плейлист"><Plus size={14} /></button></div>
+    {#each app.playlists as p (p.id)}
+      <button class="item alb" class:active={app.view === "playlist" && app.focus?.key === String(p.id)} onclick={() => { app.view = "playlist"; app.focus = { kind: "playlist", key: String(p.id) }; }}>
+        {#if p.covers[0]}<img class="mini" src={coverUrl(p.covers[0])} alt="" />{:else}<span class="mini ph"></span>{/if}
+        <span class="at"><span class="ellipsis">{p.name}</span><span class="ellipsis faint">{p.count} {plural(p.count, "трек", "трека", "треков")}</span></span>
+      </button>
+    {:else}
+      <button class="item small-hint faint" onclick={newPlaylist}>Создать первый плейлист</button>
     {/each}
   </div>
 
@@ -104,6 +124,11 @@
   :root[data-theme="paper"] .item { border-radius: 0; font-size: 15px; height: 36px; }
   :root[data-theme="paper"] .item :global(svg) { display: none; }
   :root[data-theme="paper"] .item.active { color: var(--accent); font-style: italic; font-family: var(--font-display); font-size: 18px; }
+  .row-h { display: flex; align-items: center; justify-content: space-between; padding-right: 6px !important; }
+  .add { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--text-3); }
+  .add:hover { background: var(--hover); color: var(--text); }
+  .mini.ph { background: linear-gradient(135deg, rgb(var(--accent-rgb, var(--accent-default)) / 0.55), var(--surface-2)); }
+  .small-hint { font-size: 12.5px; height: 32px; }
   .item.alb { height: 46px; gap: 10px; padding: 0 8px; }
   .mini { width: 30px; height: 30px; border-radius: 7px; object-fit: cover; flex: none; }
   .at { display: flex; flex-direction: column; min-width: 0; font-size: 12.5px; line-height: 1.25; }

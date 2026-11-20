@@ -62,6 +62,16 @@ const lyricText = [
   "И трамваи вытянутся в нить", "Я оставлю свет для темноты", "Чтобы было с чем её делить",
 ];
 
+const lists: { id: number; name: string; ids: string[]; updatedAt: number }[] = [
+  { id: 1, name: "Ночная дорога", ids: ["t3", "t8", "t12", "t1", "t20"], updatedAt: Date.now() },
+];
+const plMeta = () => lists.map((l) => ({
+  id: l.id, name: l.name, count: l.ids.length, updatedAt: l.updatedAt,
+  durationMs: l.ids.reduce((s, id) => s + (tracks.find((t) => t.id === id)?.durationMs ?? 0), 0),
+  covers: [...new Set(l.ids.map((id) => tracks.find((t) => t.id === id)?.cover).filter(Boolean))].slice(0, 4),
+}));
+const plChanged = () => emit("oto://playlists", 0);
+
 function pos() { return state.playing ? state.posMs + (Date.now() - state.at) : state.posMs; }
 function push() { state.posMs = pos(); state.at = Date.now(); emit("oto://state", { ...state }); }
 function load(i: number) {
@@ -93,6 +103,13 @@ export function installMock() {
           daily: Array.from({ length: 30 }, (_, i) => ({ day: new Date(Date.now() - (29 - i) * 86400000).toISOString().slice(0, 10), ms: Math.random() * 3 * 3600000 })),
           rising: { artist: "Полынь", plays: 18, ms: 2.4 * 3600000, cover: tracks[2].cover },
         };
+      case "playlists": return plMeta();
+      case "playlist_tracks": return lists.find((l) => l.id === args.id)?.ids ?? [];
+      case "playlist_create": { const id = Date.now(); lists.unshift({ id, name: args.name, ids: args.ids ?? [], updatedAt: Date.now() }); plChanged(); return id; }
+      case "playlist_rename": { const l = lists.find((x) => x.id === args.id); if (l) l.name = args.name; plChanged(); return null; }
+      case "playlist_delete": { const i = lists.findIndex((x) => x.id === args.id); if (i >= 0) lists.splice(i, 1); plChanged(); return null; }
+      case "playlist_add": { const l = lists.find((x) => x.id === args.id)!; const before = l.ids.length; for (const t of args.ids) if (!l.ids.includes(t)) l.ids.push(t); plChanged(); return l.ids.length - before; }
+      case "playlist_set": { const l = lists.find((x) => x.id === args.id); if (l) l.ids = args.ids; plChanged(); return null; }
       case "player": {
         const r = args.req;
         if (r.type === "toggle") { state.posMs = pos(); state.at = Date.now(); state.playing = !state.playing; }
@@ -104,6 +121,9 @@ export function installMock() {
         else if (r.type === "jumpTo") load(r.index);
         else if (r.type === "shuffle") state.shuffle = r.on;
         else if (r.type === "repeat") state.repeat = r.mode;
+        else if (r.type === "queueRemove") { state.queue.splice(r.index, 1); if (r.index < state.index) state.index--; }
+        else if (r.type === "queueMove") { const [x] = state.queue.splice(r.from, 1); state.queue.splice(r.to, 0, x); const c = state.index; state.index = c === r.from ? r.to : r.from < c && r.to >= c ? c - 1 : r.from > c && r.to <= c ? c + 1 : c; }
+        else if (r.type === "queueClear") { state.queue = [state.queue[state.index]]; state.index = 0; }
         push();
         return null;
       }

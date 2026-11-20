@@ -2,10 +2,24 @@
   // Virtualised track table: only visible rows are in the DOM, so 20k-track libraries scroll smoothly.
   import { app, player } from "../store.svelte";
   import { coverUrl, fmtTime, type Track } from "../api";
-  import { Heart, Play, ListPlus, ListEnd } from "../icons";
+  import { Heart, Play, Ellipsis, Grip } from "../icons";
   import Spectrum from "./Spectrum.svelte";
 
-  let { tracks, showAlbum = true, numbered = false }: { tracks: Track[]; showAlbum?: boolean; numbered?: boolean } = $props();
+  let {
+    tracks,
+    showAlbum = true,
+    numbered = false,
+    playlistId,
+    onReorder,
+  }: {
+    tracks: Track[];
+    showAlbum?: boolean;
+    numbered?: boolean;
+    /** When set, the context menu offers "remove from playlist". */
+    playlistId?: number;
+    /** When set, rows get a drag handle and can be reordered. */
+    onReorder?: (from: number, to: number) => void;
+  } = $props();
 
   const ROW = 56;
   let viewport: HTMLDivElement;
@@ -20,6 +34,46 @@
   function play(i: number) {
     player.playList(ids, i);
   }
+
+  function menu(e: MouseEvent, i: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    app.menu = { x: e.clientX, y: e.clientY, ids: [tracks[i].id], playlistId, index: playlistId != null ? i : undefined };
+  }
+
+  // Pointer-driven reorder that works with virtualisation: rows are absolutely placed by
+  // index, so while dragging we just shift the rows between `from` and `to` by one slot.
+  let drag = $state<{ from: number; to: number; y: number; grab: number } | null>(null);
+  function dragStart(e: PointerEvent, i: number) {
+    if (!onReorder) return;
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const top = viewport.getBoundingClientRect().top + 34 - viewport.scrollTop;
+    drag = { from: i, to: i, y: i * ROW, grab: e.clientY - top - i * ROW };
+  }
+  function dragMove(e: PointerEvent) {
+    if (!drag) return;
+    const top = viewport.getBoundingClientRect().top + 34 - viewport.scrollTop;
+    const y = e.clientY - top - drag.grab;
+    drag.y = Math.max(0, Math.min((tracks.length - 1) * ROW, y));
+    drag.to = Math.round(drag.y / ROW);
+    // Auto-scroll near the edges.
+    const r = viewport.getBoundingClientRect();
+    if (e.clientY < r.top + 50) viewport.scrollTop -= 12;
+    else if (e.clientY > r.bottom - 40) viewport.scrollTop += 12;
+  }
+  function dragEnd(e?: PointerEvent) {
+    if (e && drag) dragMove(e);
+    if (drag && drag.from !== drag.to) onReorder?.(drag.from, drag.to);
+    drag = null;
+  }
+  const rowY = (i: number) => {
+    if (!drag) return i * ROW;
+    if (i === drag.from) return drag.y;
+    if (drag.from < drag.to && i > drag.from && i <= drag.to) return (i - 1) * ROW;
+    if (drag.from > drag.to && i >= drag.to && i < drag.from) return (i + 1) * ROW;
+    return i * ROW;
+  };
 </script>
 
 <div class="list" bind:this={viewport} bind:clientHeight={height} onscroll={() => (scrollTop = viewport.scrollTop)}>
@@ -36,12 +90,18 @@
       <div
         class="row"
         class:cur={t.id === current}
-        style="transform:translateY({i * ROW}px)"
+        class:dragging={drag?.from === i}
+        class:shifting={!!drag && drag.from !== i}
+        style="transform:translateY({rowY(i)}px)"
         ondblclick={() => play(i)}
+        oncontextmenu={(e) => menu(e, i)}
         role="row"
         tabindex="-1"
       >
         <span class="c-n num">
+          {#if onReorder}
+            <span class="grip" role="button" tabindex="-1" aria-label="Перетащить" onpointerdown={(e) => dragStart(e, i)} onpointermove={dragMove} onpointerup={dragEnd} onpointercancel={dragEnd}><Grip size={14} /></span>
+          {/if}
           {#if t.id === current && app.player.playing}
             <span class="eq"><Spectrum bars={3} gap={2} radius={1} /></span>
           {:else}
@@ -60,8 +120,7 @@
         </span>
         {#if showAlbum}<span class="c-al ellipsis muted">{t.album}</span>{/if}
         <span class="c-act">
-          <button class="icon-btn mini" onclick={() => player.playNext([t.id])} aria-label="Сыграть следующим"><ListPlus size={15} /></button>
-          <button class="icon-btn mini" onclick={() => player.enqueue([t.id])} aria-label="В конец очереди"><ListEnd size={15} /></button>
+          <button class="icon-btn mini" onclick={(e) => menu(e, i)} aria-label="Ещё"><Ellipsis size={16} /></button>
           <button class="icon-btn mini like" class:on={t.liked} onclick={() => player.like(t.id)} aria-label="В избранное">
             <Heart size={15} fill={t.liked ? "currentColor" : "none"} />
           </button>
@@ -76,12 +135,12 @@
   .list { position: relative; height: 100%; overflow-y: auto; overflow-x: hidden; }
   .head, .row {
     display: grid;
-    grid-template-columns: 44px minmax(0, 2.2fr) minmax(0, 1.3fr) 104px 56px;
+    grid-template-columns: 44px minmax(0, 2.2fr) minmax(0, 1.3fr) 76px 56px;
     align-items: center;
     gap: 14px;
     padding: 0 14px;
   }
-  .list:not(:has(.c-al)) .head, .list:not(:has(.c-al)) .row { grid-template-columns: 44px minmax(0, 1fr) 104px 56px; }
+  .list:not(:has(.c-al)) .head, .list:not(:has(.c-al)) .row { grid-template-columns: 44px minmax(0, 1fr) 76px 56px; }
   .head {
     position: sticky; top: 0; z-index: 2; height: 34px;
     font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3);
@@ -102,6 +161,10 @@
   :root[data-theme="paper"] .row:hover { background: var(--surface-2); }
 
   .c-n { position: relative; display: grid; place-items: center; color: var(--text-3); font-size: 12px; }
+  .grip { position: absolute; left: -16px; top: 50%; translate: 0 -50%; display: grid; place-items: center; width: 18px; height: 30px; cursor: grab; color: var(--text-3); opacity: 0; touch-action: none; }
+  .row:hover .grip, .dragging .grip { opacity: 1; }
+  .dragging { z-index: 3; background: var(--surface-2) !important; box-shadow: 0 16px 40px -16px rgb(0 0 0 / 0.6); cursor: grabbing; }
+  .shifting { transition: transform 0.22s var(--ease-out); }
   .hover-play { position: absolute; inset: 0; display: none; place-items: center; color: var(--text); }
   .row:hover .hover-play { display: grid; }
   .row:hover .idx, .row:hover .eq { visibility: hidden; }
@@ -113,7 +176,7 @@
   .by { font-size: 12px; color: var(--text-2); }
   :root[data-theme="paper"] .name { font-family: var(--font-display); font-size: 16px; font-weight: 600; }
   .c-al { font-size: 13px; }
-  .c-act { display: flex; justify-content: flex-end; gap: 2px; }
+  .c-act { display: flex; justify-content: flex-end; gap: 2px; padding-right: 2px; }
   .c-act .icon-btn { opacity: 0; width: 30px; height: 30px; }
   .row:hover .c-act .icon-btn, .c-act .like.on { opacity: 1; }
   .c-d { text-align: right; font-size: 12px; }

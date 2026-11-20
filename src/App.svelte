@@ -13,6 +13,8 @@
   import Albums from "./lib/views/Albums.svelte";
   import Stats from "./lib/views/Stats.svelte";
   import SettingsView from "./lib/views/SettingsView.svelte";
+  import PlaylistView from "./lib/views/PlaylistView.svelte";
+  import ContextMenu from "./lib/components/ContextMenu.svelte";
 
   function keys(e: KeyboardEvent) {
     const tag = (e.target as HTMLElement)?.tagName;
@@ -46,6 +48,7 @@
         {:else if app.view === "artists"}<Albums mode="artists" />
         {:else if app.view === "stats"}<Stats />
         {:else if app.view === "settings"}<SettingsView />
+        {:else if app.view === "playlist"}<PlaylistView />
         {/if}
       </div>
     {/key}
@@ -56,6 +59,7 @@
 </div>
 
 {#if app.lyricsOpen}<LyricsView />{/if}
+{#if app.menu}<ContextMenu />{/if}
 
 {#if app.toast}
   {#key app.toast.at}

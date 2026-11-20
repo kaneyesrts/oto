@@ -39,9 +39,11 @@ async fn set_settings(app: AppHandle, settings: Settings) -> Vec<String> {
         let old = s.clone();
         let (x, y) = (s.widget.x, s.widget.y);
         *s = settings.clone();
-        // The widget's position is owned by the window, not the settings form.
+        // The widget's position is owned by the window, and the volume by the engine;
+        // the settings form may hold stale copies of both.
         s.widget.x = x;
         s.widget.y = y;
+        s.volume = app.state::<Audio>().snapshot().volume;
         old
     };
     let new = st.settings.read().clone();
@@ -114,6 +116,9 @@ enum PlayerReq {
     Volume { value: f32 },
     Shuffle { on: bool },
     Repeat { mode: String },
+    QueueRemove { index: usize },
+    QueueMove { from: usize, to: usize },
+    QueueClear,
 }
 
 #[tauri::command]
@@ -133,12 +138,71 @@ fn player(audio: State<Audio>, req: PlayerReq) {
         PlayerReq::Volume { value } => Cmd::Volume(value),
         PlayerReq::Shuffle { on } => Cmd::Shuffle(on),
         PlayerReq::Repeat { mode } => Cmd::Repeat(mode),
+        PlayerReq::QueueRemove { index } => Cmd::QueueRemove(index),
+        PlayerReq::QueueMove { from, to } => Cmd::QueueMove { from, to },
+        PlayerReq::QueueClear => Cmd::QueueClear,
     });
 }
 
 #[tauri::command]
 fn player_state(audio: State<Audio>) -> PlayerState {
     audio.snapshot()
+}
+
+// ---------- playlists ----------
+
+#[tauri::command]
+fn playlists(db: State<Db>) -> Vec<db::Playlist> {
+    db.playlists()
+}
+
+#[tauri::command]
+fn playlist_tracks(db: State<Db>, id: i64) -> Vec<String> {
+    db.playlist_tracks(id)
+}
+
+#[tauri::command]
+fn playlist_create(app: AppHandle, db: State<Db>, name: String, ids: Option<Vec<String>>) -> i64 {
+    let id = db.playlist_create(name.trim());
+    if let Some(ids) = ids {
+        db.playlist_set(id, &ids);
+    }
+    let _ = app.emit("oto://playlists", id);
+    id
+}
+
+#[tauri::command]
+fn playlist_rename(app: AppHandle, db: State<Db>, id: i64, name: String) {
+    db.playlist_rename(id, name.trim());
+    let _ = app.emit("oto://playlists", id);
+}
+
+#[tauri::command]
+fn playlist_delete(app: AppHandle, db: State<Db>, id: i64) {
+    db.playlist_delete(id);
+    let _ = app.emit("oto://playlists", id);
+}
+
+/// Appends tracks, skipping ones already in the playlist. Returns how many were added.
+#[tauri::command]
+fn playlist_add(app: AppHandle, db: State<Db>, id: i64, ids: Vec<String>) -> usize {
+    let mut cur = db.playlist_tracks(id);
+    let before = cur.len();
+    for t in ids {
+        if !cur.contains(&t) {
+            cur.push(t);
+        }
+    }
+    let added = cur.len() - before;
+    db.playlist_set(id, &cur);
+    let _ = app.emit("oto://playlists", id);
+    added
+}
+
+#[tauri::command]
+fn playlist_set(app: AppHandle, db: State<Db>, id: i64, ids: Vec<String>) {
+    db.playlist_set(id, &ids);
+    let _ = app.emit("oto://playlists", id);
 }
 
 // ---------- lyrics & stats ----------
@@ -258,6 +322,13 @@ pub fn run() {
             show_main,
             hide_flyout,
             toggle_widget,
+            playlists,
+            playlist_tracks,
+            playlist_create,
+            playlist_rename,
+            playlist_delete,
+            playlist_add,
+            playlist_set,
         ])
         .build(tauri::generate_context!())
         .expect("error while building oto")

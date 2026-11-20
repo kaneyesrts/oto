@@ -75,6 +75,19 @@ impl Db {
                 json TEXT NOT NULL,
                 fetched_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS playlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS playlist_tracks (
+                playlist_id INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                track_id TEXT NOT NULL,
+                added_at INTEGER NOT NULL,
+                PRIMARY KEY (playlist_id, position)
+            );
             CREATE TABLE IF NOT EXISTS lyrics_offset (
                 track_id TEXT PRIMARY KEY,
                 offset_ms INTEGER NOT NULL
@@ -211,6 +224,83 @@ impl Db {
             "INSERT OR REPLACE INTO lyrics_offset (track_id, offset_ms) VALUES (?, ?)",
             params![id, ms],
         );
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Playlist {
+    pub id: i64,
+    pub name: String,
+    pub count: u32,
+    pub duration_ms: u64,
+    /// Up to four distinct covers for the mosaic.
+    pub covers: Vec<String>,
+    pub updated_at: i64,
+}
+
+impl Db {
+    pub fn playlists(&self) -> Vec<Playlist> {
+        let c = self.0.lock();
+        let mut st = c.prepare("SELECT id, name, updated_at FROM playlists ORDER BY updated_at DESC").unwrap();
+        let base: Vec<(i64, String, i64)> =
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().filter_map(Result::ok).collect();
+        base.into_iter()
+            .map(|(id, name, updated_at)| {
+                let (count, duration_ms): (i64, i64) = c
+                    .query_row(
+                        "SELECT COUNT(*), COALESCE(SUM(t.duration_ms), 0) FROM playlist_tracks p LEFT JOIN tracks t ON t.id = p.track_id WHERE p.playlist_id = ?",
+                        [id],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .unwrap_or((0, 0));
+                let mut cs = c
+                    .prepare("SELECT DISTINCT t.cover FROM playlist_tracks p JOIN tracks t ON t.id = p.track_id WHERE p.playlist_id = ? AND t.cover IS NOT NULL ORDER BY p.position LIMIT 4")
+                    .unwrap();
+                let covers = cs.query_map([id], |r| r.get(0)).unwrap().filter_map(Result::ok).collect();
+                Playlist { id, name, count: count as u32, duration_ms: duration_ms as u64, covers, updated_at }
+            })
+            .collect()
+    }
+
+    pub fn playlist_tracks(&self, id: i64) -> Vec<String> {
+        let c = self.0.lock();
+        let mut st = c.prepare("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position").unwrap();
+        st.query_map([id], |r| r.get(0)).unwrap().filter_map(Result::ok).collect()
+    }
+
+    pub fn playlist_create(&self, name: &str) -> i64 {
+        let c = self.0.lock();
+        let now = now_ms();
+        let _ = c.execute("INSERT INTO playlists (name, created_at, updated_at) VALUES (?, ?, ?)", params![name, now, now]);
+        c.last_insert_rowid()
+    }
+
+    pub fn playlist_rename(&self, id: i64, name: &str) {
+        let c = self.0.lock();
+        let _ = c.execute("UPDATE playlists SET name = ?, updated_at = ? WHERE id = ?", params![name, now_ms(), id]);
+    }
+
+    pub fn playlist_delete(&self, id: i64) {
+        let c = self.0.lock();
+        let _ = c.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", [id]);
+        let _ = c.execute("DELETE FROM playlists WHERE id = ?", [id]);
+    }
+
+    /// Rewrites the whole ordering. Playlists are small; this keeps positions dense and simple.
+    pub fn playlist_set(&self, id: i64, ids: &[String]) {
+        let mut c = self.0.lock();
+        let tx = c.transaction().unwrap();
+        let now = now_ms();
+        let _ = tx.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", [id]);
+        {
+            let mut st = tx.prepare("INSERT INTO playlist_tracks (playlist_id, position, track_id, added_at) VALUES (?, ?, ?, ?)").unwrap();
+            for (i, t) in ids.iter().enumerate() {
+                let _ = st.execute(params![id, i as i64, t, now]);
+            }
+        }
+        let _ = tx.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", params![now, id]);
+        let _ = tx.commit();
     }
 }
 

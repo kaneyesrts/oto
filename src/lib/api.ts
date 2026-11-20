@@ -121,7 +121,19 @@ export type PlayerReq =
   | { type: "seekBy"; ms: number }
   | { type: "volume"; value: number }
   | { type: "shuffle"; on: boolean }
-  | { type: "repeat"; mode: string };
+  | { type: "repeat"; mode: string }
+  | { type: "queueRemove"; index: number }
+  | { type: "queueMove"; from: number; to: number }
+  | { type: "queueClear" };
+
+export interface Playlist {
+  id: number;
+  name: string;
+  count: number;
+  durationMs: number;
+  covers: string[];
+  updatedAt: number;
+}
 
 export const api = {
   settings: () => invoke<Settings>("get_settings"),
@@ -139,6 +151,13 @@ export const api = {
   showMain: () => invoke("show_main"),
   hideFlyout: () => invoke("hide_flyout"),
   toggleWidget: () => invoke("toggle_widget"),
+  playlists: () => invoke<Playlist[]>("playlists"),
+  playlistTracks: (id: number) => invoke<string[]>("playlist_tracks", { id }),
+  playlistCreate: (name: string, ids?: string[]) => invoke<number>("playlist_create", { name, ids }),
+  playlistRename: (id: number, name: string) => invoke("playlist_rename", { id, name }),
+  playlistDelete: (id: number) => invoke("playlist_delete", { id }),
+  playlistAdd: (id: number, ids: string[]) => invoke<number>("playlist_add", { id, ids }),
+  playlistSet: (id: number, ids: string[]) => invoke("playlist_set", { id, ids }),
 };
 
 const coverCache = new Map<string, string>();

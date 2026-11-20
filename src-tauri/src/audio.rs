@@ -33,6 +33,9 @@ pub enum Cmd {
     Shuffle(bool),
     Repeat(String),
     RefreshTrack(String),
+    QueueRemove(usize),
+    QueueMove { from: usize, to: usize },
+    QueueClear,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -166,6 +169,8 @@ struct Engine {
     device_lost: Arc<AtomicBool>,
     player: Option<Player>,
     original_queue: Option<Vec<String>>,
+    /// Set when the volume changes; persisted shortly after the user stops dragging.
+    volume_dirty: Option<Instant>,
     // play accounting
     started_at: i64,
     listened_ms: u64,
@@ -193,6 +198,7 @@ pub fn start(app: AppHandle, volume: f32) -> Audio {
                     ring,
                     sink,
                     device_lost,
+                    volume_dirty: None,
                     player: None,
                     original_queue: None,
                     started_at: 0,
@@ -264,6 +270,10 @@ impl Engine {
                 self.recover_device();
             }
             self.tick();
+            if self.volume_dirty.is_some_and(|t| t.elapsed() > Duration::from_millis(700)) {
+                self.volume_dirty = None;
+                crate::shell::persist(&self.app);
+            }
             if self.state.read().playing && last_emit.elapsed() > Duration::from_millis(1000) {
                 self.emit();
                 last_emit = Instant::now();
@@ -479,6 +489,63 @@ impl Engine {
                 }
             }
             Cmd::Repeat(mode) => self.state.write().repeat = mode,
+            Cmd::QueueRemove(i) => {
+                let cur = self.state.read().index;
+                if i == cur {
+                    // Removing the playing track: skip to what follows it.
+                    let len = self.state.read().queue.len();
+                    self.state.write().queue.remove(i);
+                    if len > 1 {
+                        let next = i.min(len - 2);
+                        let playing = self.state.read().playing;
+                        self.account(true);
+                        self.load(next, playing);
+                    } else {
+                        self.player = None;
+                        let mut s = self.state.write();
+                        s.track = None;
+                        s.playing = false;
+                        s.index = 0;
+                    }
+                } else {
+                    let mut s = self.state.write();
+                    if i < s.queue.len() {
+                        s.queue.remove(i);
+                        if i < s.index {
+                            s.index -= 1;
+                        }
+                    }
+                }
+            }
+            Cmd::QueueMove { from, to } => {
+                let mut s = self.state.write();
+                let len = s.queue.len();
+                if from < len && to < len && from != to {
+                    let id = s.queue.remove(from);
+                    s.queue.insert(to, id);
+                    let cur = s.index;
+                    s.index = if cur == from {
+                        to
+                    } else if from < cur && to >= cur {
+                        cur - 1
+                    } else if from > cur && to <= cur {
+                        cur + 1
+                    } else {
+                        cur
+                    };
+                }
+            }
+            Cmd::QueueClear => {
+                // Keep only what is playing now.
+                let mut s = self.state.write();
+                if let Some(id) = s.queue.get(s.index).cloned() {
+                    s.queue = vec![id];
+                    s.index = 0;
+                } else {
+                    s.queue.clear();
+                }
+                self.original_queue = None;
+            }
             Cmd::RefreshTrack(id) => {
                 let fresh = self.db().track(&id);
                 let mut s = self.state.write();
@@ -492,6 +559,7 @@ impl Engine {
     fn set_volume(&mut self, v: f32) {
         let v = v.clamp(0.0, 1.0);
         self.state.write().volume = v;
+        self.volume_dirty = Some(Instant::now());
         if let Some(p) = &self.player {
             // Squared curve: linear sliders feel like they do nothing in the top half.
             p.set_volume(v * v);
