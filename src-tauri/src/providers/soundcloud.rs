@@ -383,6 +383,11 @@ impl Provider for SoundCloud {
         Ok(ArtistPage { artist, description, top_tracks, albums, similar: vec![] })
     }
 
+    fn similar(&self, remote_id: &str) -> anyhow::Result<Vec<RemoteTrack>> {
+        let v = self.api_get(&format!("{API}/tracks/{remote_id}/related"), &[("limit", "25")])?;
+        Ok(collection(&v).iter().filter_map(map_track).collect())
+    }
+
     fn album(&self, remote_id: &str) -> anyhow::Result<AlbumPage> {
         let p = self.api_get(&format!("{API}/playlists/{remote_id}"), &[])?;
         let album = map_playlist(&p).ok_or_else(|| anyhow::anyhow!("SoundCloud: playlist not found"))?;

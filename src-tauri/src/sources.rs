@@ -91,6 +91,16 @@ impl Sources {
         self.save();
     }
 
+    pub fn status_connected(&self, id: &str) -> bool {
+        let c = self.creds.read();
+        match id {
+            "yandex" => c.yandex_token.is_some(),
+            "soundcloud" => c.soundcloud_oauth.is_some(),
+            "spotify" => c.spotify_refresh.is_some(),
+            _ => false,
+        }
+    }
+
     pub fn status(&self) -> Vec<SourceStatus> {
         let c = self.creds.read().clone();
         let y = self.yandex();

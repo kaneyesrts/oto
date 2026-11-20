@@ -106,4 +106,8 @@ pub trait Provider: Send + Sync {
     fn album(&self, _remote_id: &str) -> anyhow::Result<AlbumPage> {
         anyhow::bail!("album pages are not supported by this source")
     }
+    /// Tracks that sound like this one (the service's own recommendation engine).
+    fn similar(&self, _remote_id: &str) -> anyhow::Result<Vec<RemoteTrack>> {
+        Ok(vec![])
+    }
 }

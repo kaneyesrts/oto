@@ -47,6 +47,7 @@ const settings: Settings = {
   lyrics: { fontScale: 1, depthBlur: true, autoAlign: true, online: true },
   visual: { particles: true, intensity: 1, quality: "high" },
   widget: { enabled: false, layer: "overlay", style: "compact", opacity: 0.92, blur: 24, scale: 1, clickThrough: false, glow: true, particles: false, spectrum: true },
+  station: { mode: "style", novelty: 0.7, excludeRecent: true },
   audio: { crossfadeMs: 0, gapless: true, eqEnabled: false, eqPreamp: 0, eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqPreset: "flat" },
   hotkeys: { playPause: "Ctrl+Alt+Space", next: "Ctrl+Alt+Right", prev: "Ctrl+Alt+Left", volumeUp: "Ctrl+Alt+Up", volumeDown: "Ctrl+Alt+Down", like: "Ctrl+Alt+L", toggleWidget: "Ctrl+Alt+W", toggleClickThrough: "Ctrl+Alt+O", seekForward: "Ctrl+Alt+Shift+Right", seekBack: "Ctrl+Alt+Shift+Left" },
 };
@@ -119,6 +120,8 @@ export function installMock() {
         return { tracks: hits, artists, errors: [] };
       }
       case "artist_ref": return "yandex:1";
+      case "station_basis": return ["Северный Ветер", "Lumen Drift", "Полынь"];
+      case "station_next": return { basis: ["Северный Ветер", "Lumen Drift", "Полынь"], tracks: tracks.slice(5, 17).map((t, i) => ({ ...t, id: `yandex:${600 + i + Math.floor(Math.random() * 1e6)}`, source: "yandex", saved: false })) };
       case "artist_images": return {};
       case "artist_page": return {
         artist: { source: "yandex", remoteId: "1", name: "Северный Ветер", imageUrl: tracks[0].cover, genres: ["инди", "пост-рок"], followers: 48211 },

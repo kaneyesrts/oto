@@ -18,6 +18,23 @@ pub struct Settings {
     pub widget: WidgetSettings,
     pub hotkeys: Hotkeys,
     pub audio: AudioSettings,
+    pub station: StationSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct StationSettings {
+    /// "style" | "discover" | "favorites" | "random"
+    pub mode: String,
+    /// 0 = only what you know, 1 = only new to you.
+    pub novelty: f32,
+    /// Skip tracks played in the last few days.
+    pub exclude_recent: bool,
+}
+impl Default for StationSettings {
+    fn default() -> Self {
+        Self { mode: "style".into(), novelty: 0.7, exclude_recent: true }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -54,6 +71,7 @@ impl Default for Settings {
             widget: WidgetSettings::default(),
             hotkeys: Hotkeys::default(),
             audio: AudioSettings::default(),
+            station: StationSettings::default(),
         }
     }
 }

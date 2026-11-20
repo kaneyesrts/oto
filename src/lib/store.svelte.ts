@@ -103,6 +103,76 @@ export async function loadLyrics(force = false) {
   }
 }
 
+// ---------------------------------------------------------------- «Поток»
+
+export const STATION_MODES: { id: import("./api").StationMode; name: string; note: string }[] = [
+  { id: "style", name: "В моём стиле", note: "похожее на то, что вы слушаете чаще всего" },
+  { id: "discover", name: "Открытия", note: "только незнакомые исполнители" },
+  { id: "favorites", name: "Любимое", note: "ваши частые и забытые треки" },
+  { id: "random", name: "Случайно", note: "что угодно, без оглядки на вкус" },
+];
+
+export const station = $state({
+  active: false,
+  loading: false,
+  startedAt: 0,
+  basis: [] as string[],
+  /** Covers of the latest batch, for the card. */
+  covers: [] as string[],
+  played: [] as string[],
+});
+
+async function stationBatch() {
+  const cfg = app.settings!.station;
+  const b = await api.stationNext({
+    mode: cfg.mode,
+    novelty: cfg.novelty,
+    excludeRecent: cfg.excludeRecent,
+    exclude: [...station.played, ...app.player.queue],
+    sessionStart: station.startedAt,
+  });
+  station.basis = b.basis;
+  station.covers = b.tracks.map((t) => t.cover).filter(Boolean).slice(0, 5) as string[];
+  station.played.push(...b.tracks.map((t) => t.id));
+  return b.tracks;
+}
+
+export async function startStation() {
+  if (station.loading) return;
+  station.loading = true;
+  station.startedAt = Date.now();
+  station.played = [];
+  try {
+    const tracks = await stationBatch();
+    if (!tracks.length) { toast("Пока не из чего собрать поток: послушайте что-нибудь"); return; }
+    await playRemote(tracks, 0, [], true);
+    station.active = true;
+  } finally {
+    station.loading = false;
+  }
+}
+
+export function stopStation() { station.active = false; }
+
+/** Keeps the station queue topped up. Called on every player update. */
+async function stationRefill() {
+  if (!station.active || station.loading) return;
+  const left = app.player.queue.length - app.player.index - 1;
+  if (left > 3) return;
+  station.loading = true;
+  try {
+    const tracks = await stationBatch();
+    const unknown = tracks.filter((t) => !trackIndex.has(t.id));
+    if (unknown.length) {
+      await api.sourceStore(unknown, false);
+      for (const t of unknown) trackIndex.set(t.id, t);
+    }
+    if (tracks.length) api.player({ type: "enqueue", ids: tracks.map((t) => t.id) });
+  } finally {
+    station.loading = false;
+  }
+}
+
 /** Opens an artist page. `ref` is "<source>:<id>" when known; otherwise the name is looked up. */
 export function openArtist(name: string, ref?: string) {
   go("artist", { kind: "remote-artist", key: ref ?? "", name });
@@ -143,13 +213,14 @@ export async function refreshSources() {
 
 /** Plays tracks that may not be stored yet (search results): store them first.
  *  `extra` are other-service copies, stored so playback can fall back to them. */
-export async function playRemote(tracks: Track[], start: number, extra: Track[] = []) {
+export async function playRemote(tracks: Track[], start: number, extra: Track[] = [], fromStation = false) {
   const unknown = [...tracks, ...extra].filter((t) => !trackIndex.has(t.id));
   if (unknown.length) {
     await api.sourceStore(unknown, false);
     for (const t of unknown) trackIndex.set(t.id, t);
   }
-  player.playList(tracks.map((t) => t.id), start);
+  if (fromStation) api.player({ type: "playList", ids: tracks.map((t) => t.id), start });
+  else player.playList(tracks.map((t) => t.id), start);
 }
 
 export async function refreshPlaylists() {
@@ -172,7 +243,8 @@ export async function saveSettings(mut: (s: Settings) => void) {
 }
 
 export const player = {
-  playList(ids: string[], start = 0) { api.player({ type: "playList", ids, start }); },
+  /** Playing anything else ends the station. */
+  playList(ids: string[], start = 0) { station.active = false; api.player({ type: "playList", ids, start }); },
   toggle() { api.player({ type: "toggle" }); },
   next() { api.player({ type: "next" }); },
   prev() { api.player({ type: "prev" }); },
@@ -216,6 +288,7 @@ export async function init(withLibrary: boolean) {
   let lastTrack = state.track?.id;
   await listen<PlayerState>("oto://state", (e) => {
     app.player = e.payload;
+    if (withLibrary) stationRefill();
     if (e.payload.track?.id !== lastTrack) {
       lastTrack = e.payload.track?.id;
       applyTheme();

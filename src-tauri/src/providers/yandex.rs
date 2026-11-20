@@ -203,6 +203,12 @@ impl Yandex {
         Ok(StreamSource::Http { url: url.to_string(), headers: Vec::new(), mime: Some(mime.into()) })
     }
 
+    /// Tracks from a radio station: "genre:rock", "track:123", "artist:456" … (needs login).
+    pub fn rotor(&self, station: &str) -> anyhow::Result<Vec<RemoteTrack>> {
+        let r = self.send(self.get(&format!("/rotor/station/{station}/tracks")).query(&[("settings2", "true")]))?;
+        Ok(r["sequence"].as_array().into_iter().flatten().filter_map(|s| map_track(&s["track"])).collect())
+    }
+
     fn fetch_text(&self, url: &str) -> anyhow::Result<String> {
         Ok(self.http().get(url).send()?.error_for_status()?.text()?)
     }
@@ -306,6 +312,20 @@ impl Provider for Yandex {
         }));
         let similar = r["similarArtists"].as_array().into_iter().flatten().filter_map(map_artist).collect();
         Ok(ArtistPage { artist, description, top_tracks, albums, similar })
+    }
+
+    fn similar(&self, remote_id: &str) -> anyhow::Result<Vec<RemoteTrack>> {
+        let id = remote_id.split(':').next().unwrap_or(remote_id);
+        // Logged in: the track's radio station is Yandex's best "more like this".
+        if self.token.is_some() {
+            if let Ok(v) = self.rotor(&format!("track:{id}")) {
+                if !v.is_empty() {
+                    return Ok(v);
+                }
+            }
+        }
+        let r = self.send(self.get(&format!("/tracks/{id}/similar")))?;
+        Ok(r["similarTracks"].as_array().into_iter().flatten().filter_map(map_track).collect())
     }
 
     fn album(&self, remote_id: &str) -> anyhow::Result<AlbumPage> {

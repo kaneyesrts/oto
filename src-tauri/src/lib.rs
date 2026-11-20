@@ -7,6 +7,7 @@ mod providers;
 mod lyrics;
 mod settings;
 mod sources;
+mod station;
 mod stream;
 mod shell;
 mod stats;
@@ -348,6 +349,8 @@ pub fn run() {
             sources::album_page,
             sources::artist_ref,
             sources::artist_images,
+            station::station_next,
+            station::station_basis,
         ])
         .build(tauri::generate_context!())
         .expect("error while building oto")

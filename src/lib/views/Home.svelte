@@ -7,6 +7,8 @@
   import { glass } from "../glass";
   import { Play, FolderPlus, Shuffle, Flame, Clock, TrendingUp } from "../icons";
   import NowStage from "../components/NowStage.svelte";
+  import StationCard from "../components/StationCard.svelte";
+  import CoverStack from "../components/CoverStack.svelte";
 
   let stats = $state<Stats | null>(null);
   onMount(async () => { stats = await api.stats("week"); });
@@ -27,13 +29,21 @@
       .filter((u) => u.t)
   );
 
-  function mix() {
-    // Liked and frequently played tracks first, padded with the rest of the library.
-    const fav = new Set([...libraryTracks().filter((t) => t.liked).map((t) => t.id), ...(stats?.topTracks.map((x) => x.track.id) ?? [])]);
-    const pool = libraryTracks().map((t) => ({ id: t.id, w: Math.random() + (fav.has(t.id) ? 0.8 : 0) }));
+  // Mixes are built once per visit so the covers on the card are exactly what plays.
+  function weightedMix(boost: Set<string>, extra = 0.8) {
+    const pool = libraryTracks().map((t) => ({ t, w: Math.random() + (boost.has(t.id) ? extra : 0) }));
     pool.sort((a, b) => b.w - a.w);
-    player.playList(pool.slice(0, 60).map((p) => p.id), 0);
+    return pool.slice(0, 60).map((p) => p.t);
   }
+  let dayMix = $state<import("../api").Track[]>([]);
+  let randomMix = $state<import("../api").Track[]>([]);
+  $effect(() => {
+    if (!libraryTracks().length || dayMix.length) return;
+    const fav = new Set([...libraryTracks().filter((t) => t.liked).map((t) => t.id), ...(stats?.topTracks.map((x) => x.track.id) ?? [])]);
+    dayMix = weightedMix(fav);
+    randomMix = weightedMix(new Set(), 0);
+  });
+  const coversOf = (l: import("../api").Track[]) => [...new Set(l.map((t) => t.cover).filter(Boolean))].slice(0, 5);
 
   async function addFolder() {
     const dir = await open({ directory: true, multiple: false, title: "Папка с музыкой" });
@@ -60,6 +70,8 @@
       <button class="pill solid" onclick={addFolder}><FolderPlus size={16} /> Добавить папку</button>
     </section>
   {:else}
+    <StationCard />
+
     <section class="hero" class:compact={!!resume}>
       {#if upNext.length}
         <div class="upnext">
@@ -73,20 +85,25 @@
             {/each}
           </div>
         </div>
-      {:else if !resume}
-        <button class="card resume panel" onclick={mix} use:glass={{ radius: 30, enabled: liquid }}>
+      {:else}
+        <button class="card mixcard hoverable panel" onclick={() => player.playList(randomMix.map((t) => t.id), 0)} use:glass={{ radius: 30, enabled: liquid }}>
+          {#if randomMix[0]?.cover}<div class="tint" style="background-image:url('{coverUrl(randomMix[0].cover)}')"></div>{/if}
           <div class="txt">
-            <div class="eyebrow">Начать</div>
-            <div class="big">Случайный микс</div>
-            <div class="muted">{libraryTracks().length} {plural(libraryTracks().length, "трек", "трека", "треков")} в библиотеке</div>
+            <div class="eyebrow">Случайный микс</div>
+            <div class="big">Всё вперемешку</div>
+            <div class="muted">60 из {libraryTracks().length} {plural(libraryTracks().length, "трека", "треков", "треков")} библиотеки</div>
           </div>
+          <div class="stackwrap"><CoverStack covers={coversOf(randomMix)} size={92} /></div>
         </button>
       {/if}
-      <button class="card mix panel" onclick={mix} use:glass={{ radius: 30, enabled: liquid }}>
-        <div class="eyebrow">Микс дня</div>
-        <div class="big">Любимое и новое</div>
-        <div class="muted">60 треков: избранное, частое и немного забытого</div>
-        <span class="go"><Shuffle size={18} /></span>
+      <button class="card mixcard hoverable panel" onclick={() => player.playList(dayMix.map((t) => t.id), 0)} use:glass={{ radius: 30, enabled: liquid }}>
+        {#if dayMix[0]?.cover}<div class="tint" style="background-image:url('{coverUrl(dayMix[0].cover)}')"></div>{/if}
+        <div class="txt">
+          <div class="eyebrow">Микс дня</div>
+          <div class="big">Любимое и новое</div>
+          <div class="muted">60 треков: избранное, частое и немного забытого</div>
+        </div>
+        <div class="stackwrap"><CoverStack covers={coversOf(dayMix)} size={92} /></div>
       </button>
     </section>
 
@@ -152,6 +169,11 @@
 
   .hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; align-items: stretch; }
   .hero.compact .card { min-height: 0; }
+  .mixcard { align-items: center; min-height: 168px; }
+  .mixcard .txt { align-self: flex-end; }
+  .tint { position: absolute; inset: -30%; background-size: cover; background-position: center; filter: blur(55px) saturate(1.5); opacity: 0.32; pointer-events: none; }
+  :root[data-theme="paper"] .tint { display: none; }
+  .stackwrap { position: relative; flex: none; margin-right: -6px; }
   .upnext { min-width: 0; display: flex; flex-direction: column; }
   .un-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; }
   .un { display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: center; padding: 6px; border-radius: 12px; text-align: left; min-width: 0; transition: background 0.15s; }
@@ -160,7 +182,6 @@
   .ut { display: flex; flex-direction: column; min-width: 0; font-weight: 600; font-size: 13.5px; }
   .ut span:last-child { font-weight: 400; font-size: 12px; }
   :root[data-theme="aura"] .card { background: rgb(255 255 255 / 0.06); backdrop-filter: blur(30px) saturate(1.3); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08); }
-  :root[data-theme="aura"] .mix { background: radial-gradient(120% 120% at 100% 0%, rgb(var(--accent-rgb, var(--accent-default)) / 0.35), transparent 60%), rgb(255 255 255 / 0.06); }
   :root[data-theme="aura"] .stat { background: rgb(255 255 255 / 0.06); backdrop-filter: blur(30px); }
   .card {
     position: relative; overflow: hidden; min-height: 196px; padding: 24px; text-align: left;
@@ -174,11 +195,6 @@
   .txt { position: relative; min-width: 0; }
   .big { font-family: var(--font-display); font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin: 8px 0 4px; line-height: 1.1; }
   :root[data-theme="paper"] .big { font-style: italic; font-size: 32px; }
-  .mix { flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 0; background:
-      radial-gradient(120% 120% at 100% 0%, color-mix(in srgb, var(--accent) 45%, transparent), transparent 60%), var(--surface); }
-  :root[data-theme="paper"] .mix { background: var(--accent); color: #fff; border-color: var(--accent); }
-  :root[data-theme="paper"] .mix .muted, :root[data-theme="paper"] .mix .eyebrow { color: rgb(255 255 255 / 0.8); }
-  .go { position: absolute; top: 20px; right: 20px; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--text); color: var(--bg); }
 
   .strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
   .stat { display: flex; align-items: center; gap: 14px; padding: 14px 18px; color: var(--accent); background: var(--surface); border-radius: var(--radius-lg); }

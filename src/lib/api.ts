@@ -146,7 +146,11 @@ export interface Settings {
   widget: WidgetSettings;
   hotkeys: Hotkeys;
   audio: AudioSettings;
+  station: StationSettings;
 }
+
+export type StationMode = "style" | "discover" | "favorites" | "random";
+export interface StationSettings { mode: StationMode; novelty: number; excludeRecent: boolean }
 
 export interface AudioSettings {
   crossfadeMs: number;
@@ -223,6 +227,9 @@ export const api = {
   albumPage: (reference: string) => invoke<AlbumView>("album_page", { reference }),
   artistRef: (name: string) => invoke<string | null>("artist_ref", { name }),
   artistImages: (names: string[]) => invoke<Record<string, string>>("artist_images", { names }),
+  stationNext: (req: { mode: string; novelty: number; excludeRecent: boolean; exclude: string[]; sessionStart: number }) =>
+    invoke<{ tracks: Track[]; basis: string[] }>("station_next", { req }),
+  stationBasis: () => invoke<string[]>("station_basis"),
   playlists: () => invoke<Playlist[]>("playlists"),
   playlistTracks: (id: number) => invoke<string[]>("playlist_tracks", { id }),
   playlistCreate: (name: string, ids?: string[]) => invoke<number>("playlist_create", { name, ids }),
