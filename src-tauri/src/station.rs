@@ -2,7 +2,7 @@
 //!
 //! Seeds come from play history: listening time weighted by recency, minus skips.
 //! Each batch mixes "new to you" tracks (services' similar-track engines and similar
-//! artists) with familiar ones from your library, in a ratio set by `novelty`.
+//! artists) with an occasional familiar one from your library, in a ratio set by `novelty`.
 //! Skips during the session push an artist out of the station.
 
 use crate::db::{match_key, now_ms, Db, Track};
@@ -141,6 +141,29 @@ fn history(db: &Db, session_start: i64) -> History {
     History { tracks, artists, recent_keys, session_skipped_artists, known_artists, last_played }
 }
 
+/// Song identity that survives re-upload noise ("Game - Song By X (Cover)", "05 - Artist -
+/// Song"): bracketed parts and "by …" dropped, last " - " segment kept. None when too
+/// short to be distinctive ("Intro").
+fn loose_title(title: &str) -> Option<String> {
+    let mut t = String::new();
+    let mut depth = 0;
+    for c in title.to_lowercase().chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = (depth - 1).max(0),
+            _ if depth == 0 => t.push(c),
+            _ => {}
+        }
+    }
+    let mut t = t.as_str();
+    for cut in [" by ", " feat", " ft.", " ft ", " prod", " slowed", " sped up"] {
+        t = t.split(cut).next().unwrap_or(t);
+    }
+    let t = t.rsplit(" - ").next().unwrap_or(t);
+    let k: String = t.chars().filter(|c| c.is_alphanumeric()).collect();
+    (k.chars().count() >= 8).then_some(k)
+}
+
 fn norm(s: &str) -> String {
     s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
 }
@@ -187,7 +210,12 @@ fn build(app: &AppHandle, req: StationReq) -> StationBatch {
         .collect();
     let ok = |artist: &str, title: &str, seen: &HashSet<String>| -> bool {
         let k = match_key(artist, title);
-        !exclude_keys.contains(&k) && !seen.contains(&k) && !h.session_skipped_artists.contains(&norm(&main_artist(artist)))
+        let loose = loose_title(title).is_some_and(|l| seen.contains(&l));
+        !exclude_keys.contains(&k) && !seen.contains(&k) && !loose && !h.session_skipped_artists.contains(&norm(&main_artist(artist)))
+    };
+    let mark = |seen: &mut HashSet<String>, t: &Track| {
+        seen.insert(match_key(&t.artist, &t.title));
+        seen.extend(loose_title(&t.title));
     };
 
     let mode = req.mode.as_str();
@@ -287,6 +315,17 @@ fn build(app: &AppHandle, req: StationReq) -> StationBatch {
     if mode == "discover" {
         fresh.retain(|t| !h.known_artists.contains(&norm(&main_artist(&t.artist))));
     }
+    // "Similar" answers often contain songs you already have; those are not discoveries,
+    // they only enter through the (small) familiar quota below.
+    let lib = db.all_tracks();
+    let lib_keys: HashSet<String> = lib.iter().filter(|t| t.saved).map(|t| match_key(&t.artist, &t.title)).collect();
+    let lib_loose: HashSet<String> = lib.iter().filter(|t| t.saved).filter_map(|t| loose_title(&t.title)).collect();
+    drop(lib);
+    fresh.retain(|t| {
+        !lib_keys.contains(&match_key(&t.artist, &t.title))
+            && !loose_title(&t.title).is_some_and(|l| lib_loose.contains(&l))
+            && !db.track(&t.id).is_some_and(|k| k.saved)
+    });
     rng.shuffle(&mut fresh);
 
     // ---------- familiar candidates (your library) ----------
@@ -317,7 +356,12 @@ fn build(app: &AppHandle, req: StationReq) -> StationBatch {
     }
 
     // ---------- compose ----------
-    let n_new = ((BATCH as f32) * novelty).round() as usize;
+    // The station is for finding music: library tracks are an occasional familiar beat
+    // (about 1 in 12 at the default setting, at most 5 with the slider all the way to
+    // "familiar"); only "Любимое" is built mostly from the library.
+    let fam_share = if mode == "favorites" { 0.85 } else { (1.0 - novelty) * 0.4 };
+    let n_fam = ((BATCH as f32) * fam_share).round() as usize;
+    let n_new = BATCH - n_fam;
     let mut seen: HashSet<String> = HashSet::new();
     let mut new_pick = vec![];
     for t in fresh {
@@ -325,35 +369,49 @@ fn build(app: &AppHandle, req: StationReq) -> StationBatch {
             break;
         }
         if ok(&t.artist, &t.title, &seen) && t.duration_ms > 45_000 {
-            seen.insert(match_key(&t.artist, &t.title));
+            mark(&mut seen, &t);
             new_pick.push(t);
         }
     }
     let mut fam_pick = vec![];
+    // Short on new tracks: a smaller batch (the queue asks again sooner) rather than
+    // padding with the library — unless there is nothing new at all.
+    let fam_cap = if new_pick.is_empty() { BATCH } else { n_fam };
     for t in familiar {
-        if fam_pick.len() + new_pick.len() >= BATCH {
+        if fam_pick.len() >= fam_cap {
             break;
         }
         if ok(&t.artist, &t.title, &seen) {
-            seen.insert(match_key(&t.artist, &t.title));
+            mark(&mut seen, &t);
             fam_pick.push(t);
         }
     }
-    // Interleave so familiar tracks are spread through the batch, not clumped.
-    let mut out = Vec::with_capacity(BATCH);
-    let (mut a, mut b) = (new_pick.into_iter(), fam_pick.into_iter());
-    let ratio = novelty.max(0.01);
-    let mut acc = 0f32;
-    loop {
-        acc += ratio;
-        let take_new = acc >= 1.0;
-        if take_new {
-            acc -= 1.0;
+    // Spread familiar tracks evenly; a batch never opens with one (unless it's all familiar).
+    let total = new_pick.len() + fam_pick.len();
+    let mut out = Vec::with_capacity(total);
+    if mode == "favorites" || new_pick.is_empty() {
+        let (mut a, mut b) = (fam_pick.into_iter(), new_pick.into_iter());
+        let ratio = (1.0 - fam_share).max(0.01);
+        let mut acc = 0f32;
+        loop {
+            acc += ratio;
+            let take_new = acc >= 1.0;
+            if take_new {
+                acc -= 1.0;
+            }
+            let next = if take_new { b.next().or_else(|| a.next()) } else { a.next().or_else(|| b.next()) };
+            match next {
+                Some(t) => out.push(t),
+                None => break,
+            }
         }
-        let next = if take_new { a.next().or_else(|| b.next()) } else { b.next().or_else(|| a.next()) };
-        match next {
-            Some(t) => out.push(t),
-            None => break,
+    } else {
+        let nf = fam_pick.len();
+        let slots: Vec<usize> = (0..nf).map(|i| (i + 1) * total / (nf + 1)).collect();
+        let (mut a, mut b) = (new_pick.into_iter(), fam_pick.into_iter());
+        for i in 0..total {
+            let next = if slots.contains(&i) { b.next().or_else(|| a.next()) } else { a.next().or_else(|| b.next()) };
+            out.extend(next);
         }
     }
     // Reflect what the library knows about these tracks (liked, cached cover).
@@ -376,3 +434,19 @@ pub fn station_basis(app: AppHandle) -> Vec<String> {
     history(&app.state::<Db>(), now_ms()).artists.into_iter().take(5).map(|(a, _)| a).collect()
 }
 
+
+#[cfg(test)]
+mod loose_tests {
+    use super::loose_title;
+    #[test]
+    fn reuploads_collapse() {
+        let a = loose_title("Never Fade Away By SAMURAI");
+        assert!(a.is_some());
+        assert_eq!(a, loose_title("Never Fade Away by P. T. Adamczyk & Olga Jankowska (SAMURAI Cover)"));
+        assert_eq!(a, loose_title("Never Fade Away"));
+        assert_eq!(a, loose_title("Never Fade Away (SAMURAI Cover) feat. Olga Jankowska"));
+        assert_eq!(loose_title("05 - P.T. Adamczyk - Outsider No More (Cyberpunk 2077)"), loose_title("Outsider No More"));
+        assert_eq!(loose_title("Intro"), None);
+        assert_ne!(loose_title("Chippin' In"), a);
+    }
+}
