@@ -43,6 +43,9 @@
 </script>
 
 <div class="online">
+  {#if source === "yandex" && !app.sources.find((s) => s.id === "yandex")?.connected}
+    <div class="hint">Без входа Яндекс Музыка даёт только 30-секундные фрагменты. <button onclick={() => api.sourceLogin("yandex")}>Войти</button></div>
+  {/if}
   {#if loading && !results.length}
     <div class="msg muted">Ищем…</div>
   {:else if error}
@@ -76,6 +79,8 @@
 <style>
   .online { height: 100%; overflow-y: auto; padding: 4px 0 30px; }
   .msg { padding: 30px 14px; }
+  .hint { margin: 4px 14px 10px; padding: 10px 14px; border-radius: 12px; background: var(--accent-soft); font-size: 13px; display: flex; align-items: center; gap: 12px; }
+  .hint button { margin-left: auto; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--text); color: var(--bg); font-weight: 600; font-size: 12px; }
   .r { display: grid; grid-template-columns: 44px 1fr auto 52px; gap: 14px; align-items: center; height: 58px; padding: 0 14px; border-radius: 12px; }
   .r:hover { background: var(--hover); }
   .r.cur .name { color: var(--accent); }

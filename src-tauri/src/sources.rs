@@ -101,7 +101,8 @@ impl Sources {
                 id: "yandex".into(),
                 name: "Яндекс Музыка".into(),
                 connected: c.yandex_token.is_some(),
-                works_anonymously: false,
+                // Search works without login; playback is then a 30 s preview.
+                works_anonymously: true,
                 account: c.yandex_token.as_ref().and_then(|_| y.account_name().ok()),
             },
             SourceStatus {
