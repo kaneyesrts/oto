@@ -111,7 +111,9 @@ export function installMock() {
       case "sources_status": return [
         { id: "yandex", name: "Яндекс Музыка", connected: true, worksAnonymously: false, account: "demo" },
         { id: "soundcloud", name: "SoundCloud", connected: false, worksAnonymously: true, account: null },
+        { id: "spotify", name: "Spotify", connected: false, worksAnonymously: false, account: null, clientId: null },
       ];
+      case "source_set_spotify_client": return null;
       case "source_search": return tracks.slice(0, 8).map((t, i) => ({ ...t, id: `${args.id}:${100 + i}`, source: args.id, saved: i % 3 === 0 }));
       case "source_store": for (const t of args.tracks) if (!tracks.find((x) => x.id === t.id)) tracks.push({ ...t, saved: args.saved }); emit("oto://library", 0); return null;
       case "search_all": {

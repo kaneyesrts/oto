@@ -375,6 +375,7 @@ pub fn run() {
             sources::sources_status,
             sources::source_login,
             sources::source_logout,
+            sources::source_set_spotify_client,
             sources::source_search,
             sources::source_store,
             sources::source_import_liked,

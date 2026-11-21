@@ -15,6 +15,8 @@ pub struct Credentials {
     pub yandex_token: Option<String>,
     pub soundcloud_oauth: Option<String>,
     pub spotify_refresh: Option<String>,
+    /// Client id of the user's own Spotify app (developer.spotify.com); None = librespot's.
+    pub spotify_client_id: Option<String>,
 }
 
 pub struct Sources {
@@ -35,6 +37,8 @@ pub struct SourceStatus {
     /// Can play without logging in (e.g. public SoundCloud tracks).
     pub works_anonymously: bool,
     pub account: Option<String>,
+    /// Spotify: the user's own app client id, if set.
+    pub client_id: Option<String>,
 }
 
 impl Sources {
@@ -43,7 +47,7 @@ impl Sources {
         Self {
             yandex: RwLock::new(Arc::new(Yandex::new(creds.yandex_token.clone()))),
             soundcloud: RwLock::new(Arc::new(SoundCloud::new(creds.soundcloud_oauth.clone()))),
-            spotify: RwLock::new(Arc::new(Spotify::new(creds.spotify_refresh.clone()))),
+            spotify: RwLock::new(Arc::new(Spotify::new(creds.spotify_refresh.clone(), creds.spotify_client_id.clone()))),
             quality: RwLock::new("lossless".into()),
             creds: RwLock::new(creds),
             path,
@@ -73,8 +77,26 @@ impl Sources {
     pub fn set_spotify_refresh(&self, token: Option<String>) {
         self.spotify.read().stop();
         self.creds.write().spotify_refresh = token.clone();
-        *self.spotify.write() = Arc::new(Spotify::new(token));
+        let client = self.creds.read().spotify_client_id.clone();
+        *self.spotify.write() = Arc::new(Spotify::new(token, client));
         self.save();
+    }
+
+    /// Switches Spotify to the user's own app. Tokens belong to one app, so this signs out.
+    pub fn set_spotify_client_id(&self, id: Option<String>) {
+        self.spotify.read().stop();
+        {
+            let mut c = self.creds.write();
+            c.spotify_client_id = id;
+            c.spotify_refresh = None;
+        }
+        let client = self.creds.read().spotify_client_id.clone();
+        *self.spotify.write() = Arc::new(Spotify::new(None, client));
+        self.save();
+    }
+
+    pub fn spotify_client_id(&self) -> String {
+        self.creds.read().spotify_client_id.clone().unwrap_or_else(|| crate::providers::spotify::DEFAULT_CLIENT_ID.to_string())
     }
 
     pub fn yandex(&self) -> Arc<Yandex> {
@@ -123,6 +145,7 @@ impl Sources {
                 // Search works without login; playback is then a 30 s preview.
                 works_anonymously: true,
                 account: c.yandex_token.as_ref().and_then(|_| y.account_name().ok()),
+                client_id: None,
             },
             SourceStatus {
                 id: "soundcloud".into(),
@@ -130,6 +153,7 @@ impl Sources {
                 connected: c.soundcloud_oauth.is_some(),
                 works_anonymously: true,
                 account: c.soundcloud_oauth.as_ref().and_then(|_| sc.account_name().ok()),
+                client_id: None,
             },
             SourceStatus {
                 id: "spotify".into(),
@@ -137,6 +161,7 @@ impl Sources {
                 connected: c.spotify_refresh.is_some(),
                 works_anonymously: false,
                 account: c.spotify_refresh.as_ref().and_then(|_| sp.account_name().ok()),
+                client_id: c.spotify_client_id.clone(),
             },
         ]
     }
@@ -299,7 +324,8 @@ pub async fn source_login(app: AppHandle, id: String) -> Result<(), String> {
         "spotify" => {
             // Browser-based OAuth with a loopback redirect; blocks until the user finishes.
             let app2 = app.clone();
-            std::thread::spawn(move || match crate::providers::spotify::login() {
+            let client_id = app.state::<Sources>().spotify_client_id();
+            std::thread::spawn(move || match crate::providers::spotify::login(&client_id) {
                 Ok(refresh) => {
                     app2.state::<Sources>().set_spotify_refresh(Some(refresh));
                     let _ = app2.emit("oto://sources", ());
@@ -311,6 +337,18 @@ pub async fn source_login(app: AppHandle, id: String) -> Result<(), String> {
         }
         _ => return Err("неизвестный источник".into()),
     }
+    Ok(())
+}
+
+/// Uses the user's own Spotify app (or librespot's when empty). Signs out of Spotify.
+#[tauri::command]
+pub fn source_set_spotify_client(app: AppHandle, client_id: String) -> Result<(), String> {
+    let id = client_id.trim().to_string();
+    if !id.is_empty() && !(id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit())) {
+        return Err("Client ID — это 32 символа из цифр и букв a–f, его видно в Settings приложения на developer.spotify.com".into());
+    }
+    app.state::<Sources>().set_spotify_client_id((!id.is_empty()).then_some(id));
+    let _ = app.emit("oto://sources", ());
     Ok(())
 }
 

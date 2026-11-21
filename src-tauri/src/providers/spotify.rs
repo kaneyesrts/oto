@@ -25,14 +25,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// librespot's public "keymaster" client id and its registered loopback redirect.
-pub const CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
+/// librespot's shared client id. Works without registering anything, but thousands of
+/// clients share its Web API rate limit; users can set their own app's id instead.
+pub const DEFAULT_CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
 pub const REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
 const SCOPES: &[&str] = &["streaming", "user-library-read", "user-read-private", "user-read-email", "playlist-read-private"];
 const API: &str = "https://api.spotify.com/v1";
 
 /// Opens the browser for login and waits for the redirect. Returns the refresh token.
-pub fn login() -> anyhow::Result<String> {
-    let client = librespot_oauth::OAuthClientBuilder::new(CLIENT_ID, REDIRECT_URI, SCOPES.to_vec())
+pub fn login(client_id: &str) -> anyhow::Result<String> {
+    let client = librespot_oauth::OAuthClientBuilder::new(client_id, REDIRECT_URI, SCOPES.to_vec())
         .open_in_browser()
         .with_custom_message("Готово. Можно вернуться в oto.")
         .build()
@@ -45,6 +47,8 @@ pub fn login() -> anyhow::Result<String> {
 }
 
 pub struct Spotify {
+    /// The app (client id) the refresh token belongs to.
+    client_id: String,
     refresh: Option<String>,
     access: Mutex<Option<(String, Instant)>>,
     backend: Mutex<Option<Arc<Backend>>>,
@@ -52,8 +56,9 @@ pub struct Spotify {
 }
 
 impl Spotify {
-    pub fn new(refresh: Option<String>) -> Self {
+    pub fn new(refresh: Option<String>, client_id: Option<String>) -> Self {
         Self {
+            client_id: client_id.filter(|c| !c.trim().is_empty()).unwrap_or_else(|| DEFAULT_CLIENT_ID.to_string()),
             refresh: refresh.filter(|r| !r.trim().is_empty()),
             access: Mutex::new(None),
             backend: Mutex::new(None),
@@ -72,7 +77,7 @@ impl Spotify {
             }
         }
         let refresh = self.refresh.as_ref().ok_or_else(|| anyhow::anyhow!("нужен вход в Spotify"))?;
-        let client = librespot_oauth::OAuthClientBuilder::new(CLIENT_ID, REDIRECT_URI, SCOPES.to_vec())
+        let client = librespot_oauth::OAuthClientBuilder::new(&self.client_id, REDIRECT_URI, SCOPES.to_vec())
             .build()
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         let tok = client.refresh_token(refresh).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -469,7 +474,7 @@ mod net_tests {
             println!("not logged in to Spotify");
             return;
         };
-        let sp = super::Spotify::new(Some(refresh));
+        let sp = super::Spotify::new(Some(refresh), None);
         let tok = sp.token().expect("token");
         let r = sp.http.get(format!("{}/me/tracks?limit=1", super::API)).bearer_auth(tok).send().unwrap();
         println!("status {} retry-after {:?}", r.status(), r.headers().get("retry-after"));

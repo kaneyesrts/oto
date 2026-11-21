@@ -67,6 +67,8 @@ export interface SourceStatus {
   connected: boolean;
   worksAnonymously: boolean;
   account?: string | null;
+  /** Spotify: the user's own app client id, if set. */
+  clientId?: string | null;
 }
 
 export interface PlayerState {
@@ -254,6 +256,7 @@ export const api = {
   toggleWidget: () => invoke("toggle_widget"),
   sources: () => invoke<SourceStatus[]>("sources_status"),
   sourceLogin: (id: string) => invoke("source_login", { id }),
+  sourceSetSpotifyClient: (clientId: string) => invoke("source_set_spotify_client", { clientId }),
   sourceLogout: (id: string) => invoke("source_logout", { id }),
   sourceSearch: (id: string, query: string) => invoke<Track[]>("source_search", { id, query }),
   sourceStore: (tracks: Track[], saved: boolean) => invoke("source_store", { tracks, saved }),
