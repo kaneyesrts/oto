@@ -1,5 +1,6 @@
 mod audio;
 mod db;
+mod discord;
 mod eq;
 mod fmp4;
 mod library;
@@ -319,6 +320,7 @@ pub fn run() {
             shell::setup_tray(&h)?;
             shell::create_flyout(&h)?;
             shell::setup_smtc(&h);
+            discord::start(h.clone());
             let _ = shell::register_hotkeys(&h, &s);
             shell::apply_widget(&h, &s);
 

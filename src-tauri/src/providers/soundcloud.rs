@@ -22,7 +22,7 @@ use reqwest::header::{ACCEPT, AUTHORIZATION};
 use reqwest::{StatusCode, Url};
 use serde_json::Value;
 
-use super::{AlbumPage, ArtistPage, Provider, RemoteAlbum, RemoteArtist, RemoteTrack, StreamSource};
+use super::{AlbumPage, ArtistPage, Provider, RemoteAlbum, RemoteArtist, RemoteTrack, ShareInfo, StreamSource};
 
 const API: &str = "https://api-v2.soundcloud.com";
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
@@ -381,6 +381,14 @@ impl Provider for SoundCloud {
             .map(|v| collection(&v).iter().filter_map(map_playlist).collect())
             .unwrap_or_default();
         Ok(ArtistPage { artist, description, top_tracks, albums, similar: vec![] })
+    }
+
+    fn share_info(&self, remote_id: &str, _album_id: Option<&str>) -> anyhow::Result<ShareInfo> {
+        let t = self.api_get(&format!("{API}/tracks/{remote_id}"), &[])?;
+        Ok(ShareInfo {
+            url: t["permalink_url"].as_str().map(str::to_string),
+            cover: map_track(&t).and_then(|r| r.cover_url),
+        })
     }
 
     fn similar(&self, remote_id: &str) -> anyhow::Result<Vec<RemoteTrack>> {

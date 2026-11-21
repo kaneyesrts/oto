@@ -19,6 +19,23 @@ pub struct Settings {
     pub hotkeys: Hotkeys,
     pub audio: AudioSettings,
     pub station: StationSettings,
+    pub discord: DiscordSettings,
+}
+
+/// "Listening to …" in the Discord profile.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DiscordSettings {
+    pub enabled: bool,
+    /// Clear the status while paused (otherwise it shows "на паузе").
+    pub hide_paused: bool,
+    /// "Listen" and "oto on GitHub" buttons.
+    pub buttons: bool,
+}
+impl Default for DiscordSettings {
+    fn default() -> Self {
+        Self { enabled: true, hide_paused: true, buttons: true }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -74,6 +91,7 @@ impl Default for Settings {
             hotkeys: Hotkeys::default(),
             audio: AudioSettings::default(),
             station: StationSettings::default(),
+            discord: DiscordSettings::default(),
         }
     }
 }

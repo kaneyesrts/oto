@@ -54,6 +54,7 @@ ctr = "0.9"
 hex = "0.4"
 # Word-exact lyrics sync: local speech recognition (whisper.cpp, CPU).
 whisper-rs = { version = "0.16", optional = true, features = ["raw-api"] }
+discord-rich-presence = "1.1.0"
 
 [features]
 default = ["wordsync"]

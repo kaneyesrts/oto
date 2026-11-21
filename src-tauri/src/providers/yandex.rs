@@ -23,7 +23,7 @@ use reqwest::blocking::{Client, RequestBuilder};
 use serde_json::Value;
 use sha2::Sha256;
 
-use super::{AlbumPage, ArtistPage, Provider, RemoteAlbum, RemoteArtist, RemoteTrack, StreamSource};
+use super::{AlbumPage, ArtistPage, Provider, RemoteAlbum, RemoteArtist, RemoteTrack, ShareInfo, StreamSource};
 
 /// Implicit-grant login for the official Yandex Music client. After login Yandex redirects to
 /// `https://music.yandex.ru/#access_token=...`; feed that URL to [`token_from_redirect`].
@@ -341,6 +341,17 @@ impl Provider for Yandex {
         }));
         let similar = r["similarArtists"].as_array().into_iter().flatten().filter_map(map_artist).collect();
         Ok(ArtistPage { artist, description, top_tracks, albums, similar })
+    }
+
+    fn share_info(&self, remote_id: &str, album_id: Option<&str>) -> anyhow::Result<ShareInfo> {
+        let tid = remote_id.split(':').next().unwrap_or(remote_id).to_string();
+        let info = self.tracks(&[tid.clone()]).ok().and_then(|v| v.first().and_then(map_track));
+        let album = album_id.map(str::to_string).or_else(|| remote_id.split(':').nth(1).map(str::to_string)).or_else(|| info.as_ref().and_then(|t| t.album_id.clone()));
+        let url = match album {
+            Some(a) if !a.is_empty() => format!("https://music.yandex.ru/album/{a}/track/{tid}"),
+            _ => format!("https://music.yandex.ru/track/{tid}"),
+        };
+        Ok(ShareInfo { url: Some(url), cover: info.and_then(|t| t.cover_url) })
     }
 
     fn similar(&self, remote_id: &str) -> anyhow::Result<Vec<RemoteTrack>> {

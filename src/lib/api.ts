@@ -178,6 +178,7 @@ export interface Settings {
   hotkeys: Hotkeys;
   audio: AudioSettings;
   station: StationSettings;
+  discord: { enabled: boolean; hidePaused: boolean; buttons: boolean };
 }
 
 export type StationMode = "style" | "discover" | "favorites" | "random";

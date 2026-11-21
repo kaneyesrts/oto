@@ -194,6 +194,15 @@
   </section>
 
   <section>
+    <h2>Discord</h2>
+    <div class="opts">
+      {@render toggle(s.discord.enabled, () => set((x) => (x.discord.enabled = !x.discord.enabled)), "Показывать, что играет", "«Слушает» в профиле Discord: обложка, трек, исполнитель и полоса прогресса")}
+      {@render toggle(s.discord.hidePaused, () => set((x) => (x.discord.hidePaused = !x.discord.hidePaused)), "Скрывать на паузе", "Иначе статус остаётся с пометкой «на паузе»")}
+      {@render toggle(s.discord.buttons, () => set((x) => (x.discord.buttons = !x.discord.buttons)), "Кнопки", "«Слушать в Яндекс Музыке» и «oto на GitHub». Другие люди их видят, а в своём профиле Discord их не показывает")}
+    </div>
+  </section>
+
+  <section>
     <h2>Система</h2>
     <div class="opts">
       {@render toggle(s.closeToTray, () => set((x) => (x.closeToTray = !x.closeToTray)), "Сворачивать в трей при закрытии", "Музыка продолжит играть, управление из трея и виджета")}

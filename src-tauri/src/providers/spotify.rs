@@ -7,7 +7,7 @@
 //!   queue; `SpotifySource` drains that queue into our own engine, so EQ, the analyser,
 //!   stats and lyrics sync work exactly as for every other source.
 
-use super::{AlbumPage, ArtistPage, Provider, RemoteAlbum, RemoteArtist, RemoteTrack, StreamSource};
+use super::{AlbumPage, ArtistPage, Provider, RemoteAlbum, RemoteArtist, RemoteTrack, ShareInfo, StreamSource};
 use librespot_core::{authentication::Credentials, config::SessionConfig, session::Session, spotify_uri::SpotifyUri};
 use librespot_playback::{
     audio_backend::{Sink, SinkResult},
@@ -187,6 +187,10 @@ impl Provider for Spotify {
         }
         Ok(out)
     }
+    fn share_info(&self, remote_id: &str, _album_id: Option<&str>) -> anyhow::Result<ShareInfo> {
+        Ok(ShareInfo { url: Some(format!("https://open.spotify.com/track/{remote_id}")), cover: None })
+    }
+
     fn stream(&self, remote_id: &str) -> anyhow::Result<StreamSource> {
         Ok(StreamSource::Spotify { uri: format!("spotify:track:{remote_id}") })
     }

@@ -7,6 +7,13 @@ pub mod yandex;
 
 use serde::{Deserialize, Serialize};
 
+/// Public page of a track and a direct cover image URL.
+#[derive(Debug, Clone, Default)]
+pub struct ShareInfo {
+    pub url: Option<String>,
+    pub cover: Option<String>,
+}
+
 /// A track as a remote service describes it. Becomes a row in `tracks` with
 /// `id = "<source>:<remote_id>"` and `source = <source>`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -105,6 +112,10 @@ pub trait Provider: Send + Sync {
     }
     fn album(&self, _remote_id: &str) -> anyhow::Result<AlbumPage> {
         anyhow::bail!("album pages are not supported by this source")
+    }
+    /// Public page of a track and a direct cover image URL (Discord presence, sharing).
+    fn share_info(&self, _remote_id: &str, _album_id: Option<&str>) -> anyhow::Result<ShareInfo> {
+        Ok(ShareInfo::default())
     }
     /// Tracks that sound like this one (the service's own recommendation engine).
     fn similar(&self, _remote_id: &str) -> anyhow::Result<Vec<RemoteTrack>> {
