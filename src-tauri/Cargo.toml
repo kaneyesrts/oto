@@ -1,6 +1,6 @@
 [package]
 name = "oto"
-version = "0.1.1"
+version = "0.1.2"
 description = "oto — music player"
 authors = ["oto"]
 edition = "2024"
