@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kaneyesrts/oto/releases/latest"><img src="https://img.shields.io/badge/Скачать_для_Windows-oto_0.1.0-ffffff?style=for-the-badge&logo=windows11&logoColor=0b0a0f&labelColor=ffffff&color=0b0a0f" alt="Скачать для Windows"></a>
+  <a href="https://github.com/kaneyesrts/oto/releases/latest"><img src="https://img.shields.io/badge/Скачать_для_Windows-oto_0.1.1-ffffff?style=for-the-badge&logo=windows11&logoColor=0b0a0f&labelColor=ffffff&color=0b0a0f" alt="Скачать для Windows"></a>
 </p>
 
 <p align="center">
