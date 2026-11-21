@@ -21,7 +21,7 @@
 <br>
 
 <p align="center">
-  <img src="docs/screenshots/lyrics-space.png" alt="Режим лирики в пространстве «Космос»" width="100%">
+  <img src="docs/screenshots/lyrics-aura.png" alt="Режим лирики на фоне «Аура»" width="100%">
 </p>
 
 **oto** — десктопный плеер, в котором музыка из папок, Яндекс Музыки, SoundCloud и Spotify
