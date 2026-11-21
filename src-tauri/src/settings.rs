@@ -85,10 +85,12 @@ pub struct LyricsSettings {
     pub depth_blur: bool,
     pub auto_align: bool,
     pub online: bool,
+    /// Re-time lyrics word by word from the singing (local speech recognition).
+    pub word_sync: bool,
 }
 impl Default for LyricsSettings {
     fn default() -> Self {
-        Self { font_scale: 1.0, depth_blur: true, auto_align: true, online: true }
+        Self { font_scale: 1.0, depth_blur: true, auto_align: true, online: true, word_sync: false }
     }
 }
 

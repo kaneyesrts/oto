@@ -1,0 +1,10 @@
+# Build settings for the word-sync feature (whisper.cpp via whisper-rs, built with CMake).
+# No libclang is needed: vendor/whisper-rs-sys always uses its bundled bindings.
+[env]
+# The `cmake` crate uses $CMAKE when it is set; point it at the copy shipped with
+# VS 2022 Build Tools (it is not on PATH). A CMAKE already set in the environment wins.
+CMAKE = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe"
+# Ninja instead of the Visual Studio generator: MSBuild fails on the long paths under
+# target/ (MAX_PATH) and Ninja is faster. Also shipped with VS 2022 Build Tools.
+CMAKE_GENERATOR = "Ninja"
+CMAKE_MAKE_PROGRAM = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja\\ninja.exe"
