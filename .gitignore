@@ -8,3 +8,6 @@ Thumbs.db
 .claude/
 src-tauri/target-dist
 src-tauri/target-test
+oto-migrate.cmd
+oto-migrate.log
+oto-migrate.ps1
