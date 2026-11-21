@@ -52,6 +52,17 @@ librespot-oauth = { version = "0.8", default-features = false, features = ["rust
 aes = "0.8"
 ctr = "0.9"
 hex = "0.4"
+# Word-exact lyrics sync: local speech recognition (whisper.cpp, CPU).
+whisper-rs = { version = "0.16", optional = true, features = ["raw-api"] }
+
+[features]
+default = ["wordsync"]
+# Re-time lyrics word by word from the singing. Build with --no-default-features to drop it.
+wordsync = ["dep:whisper-rs"]
+
+[patch.crates-io]
+# whisper-rs-sys patched to build on Windows without libclang (see vendor/whisper-rs-sys/build.rs).
+whisper-rs-sys = { path = "vendor/whisper-rs-sys" }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

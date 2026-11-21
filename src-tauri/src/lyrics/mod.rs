@@ -4,6 +4,7 @@
 pub mod align;
 pub mod lrc;
 pub mod lrclib;
+pub mod wordsync;
 
 use crate::db::{now_ms, Db, Track};
 use lofty::prelude::*;
@@ -40,6 +41,12 @@ pub struct LyricsDoc {
     pub auto_scale: f32,
     /// User's manual nudge, applied by the UI on top.
     pub user_offset_ms: i32,
+    /// Re-timed word by word from the singing (see `wordsync`).
+    #[serde(default)]
+    pub word_synced: bool,
+    /// Word sync was tried on this text and could not match it to the recording.
+    #[serde(default)]
+    pub word_sync_failed: bool,
 }
 
 struct Candidate {

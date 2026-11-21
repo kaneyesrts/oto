@@ -103,6 +103,9 @@ export interface LyricsDoc {
   autoShiftMs: number;
   autoScale: number;
   userOffsetMs: number;
+  /** Re-timed word by word from the singing (local speech recognition). */
+  wordSynced?: boolean;
+  wordSyncFailed?: boolean;
 }
 
 export interface WidgetSettings {
@@ -136,6 +139,11 @@ export interface Hotkeys {
   seekForward: string;
   seekBack: string;
 }
+
+export interface WordSyncStatus { available: boolean; modelReady: boolean; modelSizeMb: number; downloading: boolean }
+export interface WordSyncModelProgress { downloaded: number; total: number; done: boolean; error?: string }
+/** stage: "decode" | "recognize" | "align" | "done" | "failed" | "cancelled" */
+export interface WordSyncProgress { id: string; stage: string; progress: number }
 
 export type SceneId = "aura" | "space" | "silk" | "aurora" | "depth" | "smoke" | "void";
 
@@ -236,6 +244,9 @@ export const api = {
   playerState: () => invoke<PlayerState>("player_state"),
   lyrics: (id: string, force = false) => invoke<LyricsDoc | null>("get_lyrics", { id, force }),
   setLyricsOffset: (id: string, ms: number) => invoke("set_lyrics_offset", { id, ms }),
+  wordsyncStatus: () => invoke<WordSyncStatus>("wordsync_status"),
+  wordsyncDownloadModel: () => invoke("wordsync_download_model"),
+  wordsyncDeleteModel: () => invoke("wordsync_delete_model"),
   stats: (range: string) => invoke<Stats>("get_stats", { range }),
   showMain: () => invoke("show_main"),
   hideFlyout: () => invoke("hide_flyout"),

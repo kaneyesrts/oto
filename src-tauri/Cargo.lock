@@ -3707,6 +3707,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "walkdir",
+ "whisper-rs",
 ]
 
 [[package]]
@@ -7080,6 +7081,24 @@ dependencies = [
  "home",
  "once_cell",
  "rustix 0.38.44",
+]
+
+[[package]]
+name = "whisper-rs"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2088172d00f936c348d6a72f488dc2660ab3f507263a195df308a3c2383229f6"
+dependencies = [
+ "whisper-rs-sys",
+]
+
+[[package]]
+name = "whisper-rs-sys"
+version = "0.15.0"
+dependencies = [
+ "cfg-if",
+ "cmake",
+ "fs_extra",
 ]
 
 [[package]]

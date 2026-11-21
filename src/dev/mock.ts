@@ -44,7 +44,7 @@ const tracks: Track[] = titles.map((title, i) => {
 const settings: Settings = {
   theme: (localStorage.getItem("oto-theme") as Settings["theme"]) || "aura",
   accentFromCover: true, reducedMotion: false, closeToTray: true, folders: ["C:/Music"], volume: 0.7,
-  lyrics: { fontScale: 1, depthBlur: true, autoAlign: true, online: true, style: "classic", align: "left", hlSung: false, hlChorus: false, hlFinale: false, glow: 0.25, beat: 0.35, color: "white" },
+  lyrics: { fontScale: 1, depthBlur: true, autoAlign: true, online: true, wordSync: false, style: "classic", align: "left", hlSung: false, hlChorus: false, hlFinale: false, glow: 0.25, beat: 0.35, color: "white" },
   visual: { particles: true, intensity: 1, quality: "high", scene: "aura", sceneSpeed: 1 },
   widget: { enabled: false, layer: "overlay", style: "compact", opacity: 0.92, blur: 24, scale: 1, clickThrough: false, glow: true, particles: false, spectrum: true, scene: "cover", lyricsStyle: "line", textGlow: 0.2, color: "white" },
   station: { mode: "style", novelty: 0.7, excludeRecent: true },
@@ -91,6 +91,8 @@ export function installMock() {
       case "get_tracks": return tracks;
       case "player_state": return { ...state, posMs: pos(), at: Date.now() };
       case "toggle_like": { const t = tracks.find((x) => x.id === args.id)!; t.liked = !t.liked; emit("oto://liked", { id: t.id, liked: t.liked }); return t.liked; }
+      case "wordsync_status": return { available: true, modelReady: false, modelSizeMb: 190, downloading: false };
+      case "wordsync_download_model": case "wordsync_delete_model": return null;
       case "get_lyrics":
         return {
           kind: "synced", source: "LRCLIB", autoShiftMs: 1800, autoScale: 1, userOffsetMs: 0,

@@ -53,6 +53,9 @@ async fn set_settings(app: AppHandle, settings: Settings) -> Vec<String> {
         old
     };
     let new = st.settings.read().clone();
+    if old.lyrics.word_sync && !new.lyrics.word_sync {
+        app.state::<lyrics::wordsync::WordSync>().cancel(None);
+    }
     shell::apply_settings(&app, &old, &new)
 }
 
@@ -218,20 +221,44 @@ async fn get_lyrics(app: AppHandle, id: String, force: Option<bool>) -> Option<l
     tauri::async_runtime::spawn_blocking(move || {
         let db = app.state::<Db>();
         let track = db.track(&id)?;
-        let (online, align) = {
+        let (online, align, word_sync) = {
             let s = app.state::<AppState>();
             let s = s.settings.read();
-            (s.lyrics.online, s.lyrics.auto_align)
+            (s.lyrics.online, s.lyrics.auto_align, s.lyrics.word_sync)
         };
+        let ws = app.state::<lyrics::wordsync::WordSync>();
         if force.unwrap_or(false) {
+            ws.cancel(Some(&id));
             db.drop_lyrics_cache(&id);
         }
         let svc = |t: &Track| sources::lyrics_for(&app, t);
-        Some(lyrics::resolve(&db, &track, online, align, force.unwrap_or(false), &svc))
+        let doc = lyrics::resolve(&db, &track, online, align, force.unwrap_or(false), &svc);
+        // Word-exact timing from the singing, in the background (`oto://lyrics-refined`).
+        if word_sync && lyrics::wordsync::wants(&doc) && lyrics::wordsync::model::ready_path(&app).is_some() {
+            ws.request(&id);
+        }
+        Some(doc)
     })
     .await
     .ok()
     .flatten()
+}
+
+#[tauri::command]
+fn wordsync_status(app: AppHandle) -> lyrics::wordsync::model::Status {
+    lyrics::wordsync::model::status(&app)
+}
+
+/// Starts downloading the speech model; progress arrives as `oto://wordsync-model`.
+#[tauri::command]
+fn wordsync_download_model(app: AppHandle) {
+    lyrics::wordsync::model::start_download(app);
+}
+
+#[tauri::command]
+fn wordsync_delete_model(app: AppHandle) {
+    app.state::<lyrics::wordsync::WordSync>().cancel(None);
+    lyrics::wordsync::model::delete(&app);
 }
 
 #[tauri::command]
@@ -286,6 +313,7 @@ pub fn run() {
             app.manage(sources::Sources::load(cfg.join("credentials.json")));
             app.state::<sources::Sources>().set_quality(&s.audio.stream_quality);
             app.manage(audio::start(h.clone(), volume));
+            app.manage(lyrics::wordsync::WordSync::start(h.clone()));
             app.state::<Audio>().send(Cmd::Audio(s.audio.clone()));
 
             shell::setup_tray(&h)?;
@@ -328,6 +356,9 @@ pub fn run() {
             player_state,
             get_lyrics,
             set_lyrics_offset,
+            wordsync_status,
+            wordsync_download_model,
+            wordsync_delete_model,
             get_stats,
             show_main,
             hide_flyout,

@@ -101,6 +101,8 @@ pub struct LyricsSettings {
     pub beat: f32,
     /// "white" | "cover" (sung words take the cover's colours)
     pub color: String,
+    /// Re-time lyrics word by word from the singing (local speech recognition).
+    pub word_sync: bool,
 }
 impl Default for LyricsSettings {
     fn default() -> Self {
@@ -117,6 +119,7 @@ impl Default for LyricsSettings {
             glow: 0.25,
             beat: 0.35,
             color: "white".into(),
+            word_sync: false,
         }
     }
 }

@@ -242,7 +242,11 @@
 
   <header class="top" data-tauri-drag-region>
     <button class="icon-btn" onclick={close} aria-label="Закрыть"><ChevronLeft size={22} /></button>
-    <div class="src faint" data-tauri-drag-region>{sourceLabel(doc)}</div>
+    <div class="src faint" data-tauri-drag-region>
+      {#if app.wordsync && app.wordsync.id === t?.id}
+        {({ decode: "Слушаем трек", recognize: "Распознаём голос", align: "Расставляем слова" } as Record<string, string>)[app.wordsync.stage] ?? "Подгоняем слова"} · {Math.round(app.wordsync.progress * 100)}%
+      {:else}{sourceLabel(doc)}{/if}
+    </div>
     <div class="tr">
       <button class="icon-btn" class:on={fxOpen} onclick={() => (fxOpen = !fxOpen)} aria-label="Эффекты" title="Эффекты и пространство"><Sparkles size={18} /></button>
       <button class="icon-btn" onclick={toggleFullscreen} aria-label="Полный экран" title="Полный экран (F11, двойной клик)">

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
-  import { app, saveSettings, refreshSources } from "../store.svelte";
-  import { api, type Hotkeys, type Settings, type ThemeId } from "../api";
+  import { app, saveSettings, refreshSources, requestWordSync } from "../store.svelte";
+  import { api, type Hotkeys, type Settings, type ThemeId, type WordSyncStatus } from "../api";
   import { FolderPlus, Refresh, X } from "../icons";
   import Equalizer from "../components/Equalizer.svelte";
 
@@ -16,6 +16,18 @@
   ];
 
   const set = (f: (x: Settings) => void) => saveSettings(f);
+
+  // Word-exact lyrics: needs a one-time speech model download.
+  let ws = $state<WordSyncStatus | null>(null);
+  const loadWs = () => api.wordsyncStatus().then((x) => (ws = x)).catch(() => (ws = null));
+  loadWs();
+  $effect(() => { if (app.wordsyncModel?.done) loadWs(); });
+  const dl = $derived(app.wordsyncModel && !app.wordsyncModel.done && !app.wordsyncModel.error ? app.wordsyncModel : null);
+  async function enableWordSync() {
+    await set((x) => (x.lyrics.wordSync = true));
+    if (ws && !ws.modelReady && !ws.downloading) api.wordsyncDownloadModel();
+    else requestWordSync();
+  }
   refreshSources();
 
   async function addFolder() {
@@ -120,6 +132,25 @@
     <div class="opts">
       {@render toggle(s.lyrics.online, () => set((x) => (x.lyrics.online = !x.lyrics.online)), "Искать в интернете", "LRCLIB, если в файле и рядом с ним текста нет")}
       {@render toggle(s.lyrics.autoAlign, () => set((x) => (x.lyrics.autoAlign = !x.lyrics.autoAlign)), "Подгонять под трек", "Сдвиг по вокалу, если текст снят с другой версии песни")}
+      {#if ws?.available}
+        <div class="opt">
+          <span>
+            <span class="ol">Слова точно по голосу</span>
+            <span class="oh faint">Плеер сам слушает песню и ставит каждое слово ровно туда, где его поют. Работает на этом компьютере, в фоне; текст без таймкодов тоже становится синхронным.</span>
+            {#if dl}
+              <span class="dl"><i style="transform:scaleX({dl.total ? dl.downloaded / dl.total : 0})"></i></span>
+              <span class="oh faint num">Скачиваем модель распознавания: {Math.round(dl.downloaded / 1e6)} из {Math.round((dl.total || ws.modelSizeMb * 1e6) / 1e6)} МБ</span>
+            {:else if ws.modelReady}
+              <button class="link faint" onclick={() => { set((x) => (x.lyrics.wordSync = false)); api.wordsyncDeleteModel().then(loadWs); }}>Удалить модель ({ws.modelSizeMb} МБ)</button>
+            {/if}
+          </span>
+          {#if !ws.modelReady && !dl}
+            <button class="mini-btn" onclick={enableWordSync}>Включить · {ws.modelSizeMb} МБ</button>
+          {:else}
+            <button class="swbtn" onclick={() => (s.lyrics.wordSync ? set((x) => (x.lyrics.wordSync = false)) : enableWordSync())} aria-label="Слова точно по голосу"><span class="sw" class:on={s.lyrics.wordSync}></span></button>
+          {/if}
+        </div>
+      {/if}
       {@render toggle(s.lyrics.depthBlur, () => set((x) => (x.lyrics.depthBlur = !x.lyrics.depthBlur)), "Глубина резкости", "Дальние строки размываются")}
       {@render slider(s.lyrics.fontScale, 0.7, 1.4, 0.05, (v) => set((x) => (x.lyrics.fontScale = v)), "Размер текста", (v) => `${Math.round(v * 100)}%`)}
       {@render choice(s.lyrics.style, [["classic", "Список"], ["edit", "Эдит"]], (v) => set((x) => (x.lyrics.style = v)), "Подача текста")}
@@ -246,4 +277,8 @@
   :root[data-theme="paper"] .mini-btn { border-radius: 0; }
   .note { font-size: 12px; margin-top: 12px; }
   .fxhint { font-size: 12px; margin: 8px 0 0; }
+  .dl { display: block; height: 4px; border-radius: 4px; margin: 8px 0 4px; max-width: 320px; background: color-mix(in srgb, var(--text) 12%, transparent); overflow: hidden; }
+  .dl i { display: block; height: 100%; background: var(--accent); transform-origin: left; transition: transform 0.3s; }
+  .link { font-size: 12px; margin-top: 4px; text-decoration: underline; text-underline-offset: 2px; }
+  .swbtn { flex: none; }
 </style>

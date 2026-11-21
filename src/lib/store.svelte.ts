@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, type LyricsDoc, type PlayerState, type Playlist, type Settings, type SourceStatus, type SpectrumFrame, type Track } from "./api";
+import { api, type LyricsDoc, type PlayerState, type Playlist, type Settings, type SourceStatus, type SpectrumFrame, type Track, type WordSyncProgress, type WordSyncModelProgress } from "./api";
 import { applyPalette } from "./color";
 
 export type View = "home" | "library" | "albums" | "artists" | "liked" | "stats" | "settings" | "playlist" | "artist" | "remote-album";
@@ -24,6 +24,10 @@ export const app = $state({
   scan: null as null | { done: number; total: number; finished: boolean },
   lyrics: null as LyricsDoc | null,
   lyricsLoading: false,
+  /** Word sync running for a track: which stage, 0–1. */
+  wordsync: null as null | WordSyncProgress,
+  /** Speech model download. */
+  wordsyncModel: null as null | WordSyncModelProgress,
   toast: null as null | { text: string; at: number },
   /** Album or artist opened from a grid. */
   focus: null as null | { kind: "album" | "artist" | "playlist" | "remote-artist" | "remote-album"; key: string; name?: string },
@@ -88,6 +92,12 @@ function applyTheme() {
 }
 
 let lyricsFor = "";
+/** Asks the backend to re-time the current track's lyrics (it only starts on a lyrics request). */
+export function requestWordSync() {
+  const t = app.player.track;
+  if (t && app.settings?.lyrics.wordSync) api.lyrics(t.id, false).catch(() => {});
+}
+
 export async function loadLyrics(force = false) {
   const t = app.player.track;
   if (!t) { app.lyrics = null; lyricsFor = ""; return; }
@@ -322,6 +332,24 @@ export async function init(withLibrary: boolean) {
     if (app.player.track?.id === e.payload.id) app.player.track = { ...app.player.track, liked: e.payload.liked };
   });
   await listen<string>("oto://error", (e) => toast(e.payload));
+  // Word-exact lyrics: the refined text replaces the current one in place.
+  await listen<{ id: string; doc: LyricsDoc }>("oto://lyrics-refined", (e) => {
+    const doc = e.payload.doc;
+    // Timing now comes from the singing itself: a manual nudge would only push it off.
+    if (doc.userOffsetMs) {
+      api.setLyricsOffset(e.payload.id, 0);
+      doc.userOffsetMs = 0;
+    }
+    if (app.player.track?.id === e.payload.id) app.lyrics = doc;
+  });
+  await listen<WordSyncProgress>("oto://wordsync-progress", (e) => {
+    app.wordsync = ["done", "failed", "cancelled"].includes(e.payload.stage) ? null : e.payload;
+  });
+  await listen<WordSyncModelProgress>("oto://wordsync-model", (e) => {
+    app.wordsyncModel = e.payload;
+    if (e.payload.error) toast(`Модель не скачалась: ${e.payload.error}`);
+    if (e.payload.done && !e.payload.error) requestWordSync();
+  });
   if (withLibrary) {
     await listen<{ done: number; total: number; finished: boolean }>("oto://scan", (e) => {
       app.scan = e.payload;
