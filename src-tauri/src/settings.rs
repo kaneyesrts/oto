@@ -85,10 +85,39 @@ pub struct LyricsSettings {
     pub depth_blur: bool,
     pub auto_align: bool,
     pub online: bool,
+    /// "classic" (scrolling list) | "edit" (one big line, words pop in as they're sung)
+    pub style: String,
+    /// "left" | "center"
+    pub align: String,
+    /// Sung lines stay lit for a while.
+    pub hl_sung: bool,
+    /// Lines that repeat (the chorus) glow.
+    pub hl_chorus: bool,
+    /// The last lines of the song build up to a glowing finale.
+    pub hl_finale: bool,
+    /// Text glow, 0–1.
+    pub glow: f32,
+    /// Text reacts to beats, 0–1.
+    pub beat: f32,
+    /// "white" | "cover" (sung words take the cover's colours)
+    pub color: String,
 }
 impl Default for LyricsSettings {
     fn default() -> Self {
-        Self { font_scale: 1.0, depth_blur: true, auto_align: true, online: true }
+        Self {
+            font_scale: 1.0,
+            depth_blur: true,
+            auto_align: true,
+            online: true,
+            style: "classic".into(),
+            align: "left".into(),
+            hl_sung: false,
+            hl_chorus: false,
+            hl_finale: false,
+            glow: 0.25,
+            beat: 0.35,
+            color: "white".into(),
+        }
     }
 }
 
@@ -99,10 +128,14 @@ pub struct VisualSettings {
     pub intensity: f32,
     /// "low" | "high"
     pub quality: String,
+    /// Space behind the lyrics: "aura" | "space" | "silk" | "aurora" | "depth" | "smoke" | "void"
+    pub scene: String,
+    /// How fast the scene moves, 0.2–2.
+    pub scene_speed: f32,
 }
 impl Default for VisualSettings {
     fn default() -> Self {
-        Self { particles: true, intensity: 1.0, quality: "high".into() }
+        Self { particles: true, intensity: 1.0, quality: "high".into(), scene: "aura".into(), scene_speed: 1.0 }
     }
 }
 
@@ -121,6 +154,14 @@ pub struct WidgetSettings {
     pub glow: bool,
     pub particles: bool,
     pub spectrum: bool,
+    /// Background: "cover" (blurred artwork) | a lyrics scene id ("aura", "space", …)
+    pub scene: String,
+    /// Lyric line in the widget: "line" | "edit"
+    pub lyrics_style: String,
+    /// Text glow, 0–1.
+    pub text_glow: f32,
+    /// "white" | "cover"
+    pub color: String,
     pub x: Option<i32>,
     pub y: Option<i32>,
 }
@@ -137,6 +178,10 @@ impl Default for WidgetSettings {
             glow: true,
             particles: false,
             spectrum: true,
+            scene: "cover".into(),
+            lyrics_style: "line".into(),
+            text_glow: 0.2,
+            color: "white".into(),
             x: None,
             y: None,
         }

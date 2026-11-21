@@ -44,9 +44,9 @@ const tracks: Track[] = titles.map((title, i) => {
 const settings: Settings = {
   theme: (localStorage.getItem("oto-theme") as Settings["theme"]) || "aura",
   accentFromCover: true, reducedMotion: false, closeToTray: true, folders: ["C:/Music"], volume: 0.7,
-  lyrics: { fontScale: 1, depthBlur: true, autoAlign: true, online: true },
-  visual: { particles: true, intensity: 1, quality: "high" },
-  widget: { enabled: false, layer: "overlay", style: "compact", opacity: 0.92, blur: 24, scale: 1, clickThrough: false, glow: true, particles: false, spectrum: true },
+  lyrics: { fontScale: 1, depthBlur: true, autoAlign: true, online: true, style: "classic", align: "left", hlSung: false, hlChorus: false, hlFinale: false, glow: 0.25, beat: 0.35, color: "white" },
+  visual: { particles: true, intensity: 1, quality: "high", scene: "aura", sceneSpeed: 1 },
+  widget: { enabled: false, layer: "overlay", style: "compact", opacity: 0.92, blur: 24, scale: 1, clickThrough: false, glow: true, particles: false, spectrum: true, scene: "cover", lyricsStyle: "line", textGlow: 0.2, color: "white" },
   station: { mode: "style", novelty: 0.7, excludeRecent: true },
   audio: { crossfadeMs: 0, gapless: true, eqEnabled: false, eqPreamp: 0, eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqPreset: "flat", streamQuality: "lossless" },
   hotkeys: { playPause: "Ctrl+Alt+Space", next: "Ctrl+Alt+Right", prev: "Ctrl+Alt+Left", volumeUp: "Ctrl+Alt+Up", volumeDown: "Ctrl+Alt+Down", like: "Ctrl+Alt+L", toggleWidget: "Ctrl+Alt+W", toggleClickThrough: "Ctrl+Alt+O", seekForward: "Ctrl+Alt+Shift+Right", seekBack: "Ctrl+Alt+Shift+Left" },

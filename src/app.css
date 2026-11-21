@@ -200,8 +200,13 @@ img { display: block; }
   padding: 0 16px;
   border-radius: 999px;
   font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: transform 0.2s var(--ease-spring), background 0.15s, box-shadow 0.2s;
 }
+/* Segmented controls and chips: fixed height, so a wrapped label would be cut off. */
+.seg { flex: none; }
+.seg button, .chip, .mini-btn, .key { white-space: nowrap; }
 .pill:active { transform: scale(0.96); }
 .pill.solid { background: var(--accent); color: var(--on-accent); }
 .pill.solid:hover { box-shadow: 0 8px 24px -8px var(--accent); }

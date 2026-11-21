@@ -6,7 +6,7 @@
   const n = $derived(list.length);
 </script>
 
-<div class="stack" class:spin style="--s:{size}px">
+<div class="stack" class:spin style="--s:{size}px; --n:{Math.max(1, n)}">
   {#each list as c, i (c + i)}
     {@const mid = (n - 1) / 2}
     {@const d = i - mid}
@@ -20,7 +20,8 @@
 </div>
 
 <style>
-  .stack { position: relative; width: calc(var(--s) * 2.1); height: calc(var(--s) * 1.15); }
+  /* Wide enough for the whole fan (offsets + rotation + hover spread), so it never spills out of its card. */
+  .stack { position: relative; width: calc(var(--s) * (1.35 + (var(--n) - 1) * 0.4)); height: calc(var(--s) * 1.3); }
   img {
     position: absolute; left: 50%; top: 50%;
     width: var(--s); height: var(--s); margin: calc(var(--s) / -2) 0 0 calc(var(--s) / -2);

@@ -38,15 +38,24 @@ export function albums(tracks: Track[]): Album[] {
   return [...m.values()].sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 }
 
+export function splitArtists(s: string | null | undefined): string[] {
+  return (s ?? "").split(/\s*(?:,|&|\bfeat\.?|\bft\.)\s*/i).map((x) => x.trim()).filter(Boolean);
+}
+
 export function artists(tracks: Track[]): Artist[] {
   const m = new Map<string, Artist & { set: Set<string> }>();
   for (const t of tracks) {
-    const name = t.albumArtist || t.artist;
-    let a = m.get(name);
-    if (!a) { a = { name, cover: t.cover, tracks: [], albums: 0, set: new Set() }; m.set(name, a); }
-    a.tracks.push(t);
-    a.set.add(t.album);
-    if (!a.cover && t.cover) a.cover = t.cover;
+    // Joint credits ("9mice, Kai Angel feat. X") count for every artist in them.
+    const names = new Set<string>();
+    for (const src of [t.artist, t.albumArtist]) for (const n of splitArtists(src)) names.add(n);
+    for (const name of names) {
+      const k = name.toLowerCase();
+      let a = m.get(k);
+      if (!a) { a = { name, cover: t.cover, tracks: [], albums: 0, set: new Set() }; m.set(k, a); }
+      a.tracks.push(t);
+      a.set.add(t.album);
+      if (!a.cover && t.cover) a.cover = t.cover;
+    }
   }
   return [...m.values()]
     .map(({ set, ...a }) => ({ ...a, albums: set.size }))

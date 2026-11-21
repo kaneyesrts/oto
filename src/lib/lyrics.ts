@@ -45,3 +45,18 @@ export const sourceLabel = (doc: LyricsDoc | null) => {
     ? ` · подогнан ${doc.autoShiftMs > 0 ? "+" : ""}${(doc.autoShiftMs / 1000).toFixed(1)} с` : "";
   return [doc.source, kind].filter(Boolean).join(" · ") + fix;
 };
+
+const normLine = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+
+/** Which lines are the chorus (text that repeats) and which are the finale (the song's
+ *  last few sung lines). Used for optional highlighting. */
+export function lineRoles(lines: LyricLine[]): { chorus: boolean[]; finale: boolean[] } {
+  const keys = lines.map((l) => normLine(l.text));
+  const count = new Map<string, number>();
+  for (const k of keys) if (k.length >= 6) count.set(k, (count.get(k) ?? 0) + 1);
+  const chorus = keys.map((k) => (count.get(k) ?? 0) >= 2);
+  const sung = lines.map((l, i) => (l.text.trim() ? i : -1)).filter((i) => i >= 0);
+  const n = Math.max(2, Math.min(6, Math.ceil(sung.length * 0.12)));
+  const fin = new Set(sung.slice(-n));
+  return { chorus, finale: lines.map((_, i) => fin.has(i)) };
+}

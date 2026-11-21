@@ -109,7 +109,7 @@
   .round { border-radius: 50% !important; }
   :root[data-theme="paper"] .tile .cover { border-radius: 0; filter: grayscale(1); }
   :root[data-theme="paper"] .tile:hover .cover { filter: none; }
-  .tn { font-weight: 600; font-size: 13.5px; }
+  .tn { font-weight: 600; font-size: 13.5px; max-width: 100%; }
   :root[data-theme="paper"] .tn { font-family: var(--font-display); font-size: 16px; }
   .ta { font-size: 12px; }
   .people .tile { align-items: center; text-align: center; }

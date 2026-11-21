@@ -122,6 +122,8 @@
       {@render toggle(s.lyrics.autoAlign, () => set((x) => (x.lyrics.autoAlign = !x.lyrics.autoAlign)), "Подгонять под трек", "Сдвиг по вокалу, если текст снят с другой версии песни")}
       {@render toggle(s.lyrics.depthBlur, () => set((x) => (x.lyrics.depthBlur = !x.lyrics.depthBlur)), "Глубина резкости", "Дальние строки размываются")}
       {@render slider(s.lyrics.fontScale, 0.7, 1.4, 0.05, (v) => set((x) => (x.lyrics.fontScale = v)), "Размер текста", (v) => `${Math.round(v * 100)}%`)}
+      {@render choice(s.lyrics.style, [["classic", "Список"], ["edit", "Эдит"]], (v) => set((x) => (x.lyrics.style = v)), "Подача текста")}
+      <p class="faint fxhint">Пространство, свечение, подсветку припева и финала удобнее настраивать прямо в режиме лирики: кнопка ✦ справа вверху, всё меняется на лету.</p>
     </div>
   </section>
 
@@ -131,6 +133,10 @@
       {@render toggle(s.widget.enabled, () => set((x) => (x.widget.enabled = !x.widget.enabled)), "Показывать виджет")}
       {@render choice(s.widget.layer, [["overlay", "Поверх окон"], ["desktop", "Под окнами"]], (v) => set((x) => (x.widget.layer = v)), "Слой")}
       {@render choice(s.widget.style, [["compact", "Компакт"], ["lyrics", "Строка лирики"], ["spectrum", "Спектр"]], (v) => set((x) => (x.widget.style = v)), "Вид")}
+      {@render choice(s.widget.scene, [["cover", "Обложка"], ["aura", "Аура"], ["space", "Космос"], ["silk", "Шёлк"], ["depth", "Огни"], ["smoke", "Дым"]], (v) => set((x) => (x.widget.scene = v)), "Фон")}
+      {@render choice(s.widget.lyricsStyle, [["line", "Плавно"], ["edit", "Эдит"]], (v) => set((x) => (x.widget.lyricsStyle = v)), "Строка лирики")}
+      {@render choice(s.widget.color, [["white", "Белый"], ["cover", "Из обложки"]], (v) => set((x) => (x.widget.color = v)), "Цвет текста")}
+      {@render slider(s.widget.textGlow, 0, 1, 0.05, (v) => set((x) => (x.widget.textGlow = v)), "Свечение текста", (v) => `${Math.round(v * 100)}%`)}
       {@render slider(s.widget.opacity, 0.2, 1, 0.02, (v) => set((x) => (x.widget.opacity = v)), "Непрозрачность", (v) => `${Math.round(v * 100)}%`)}
       {@render slider(s.widget.blur, 0, 40, 1, (v) => set((x) => (x.widget.blur = v)), "Размытие обложки", (v) => `${v}px`)}
       {@render slider(s.widget.scale, 0.75, 1.5, 0.05, (v) => set((x) => (x.widget.scale = v)), "Масштаб", (v) => `${Math.round(v * 100)}%`)}
@@ -234,9 +240,10 @@
   .src b { font-size: 14px; }
   .ok { color: var(--accent); }
   .eqwrap { margin-top: 14px; }
-  .srow { display: flex; gap: 6px; margin-top: 8px; }
-  .mini-btn { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--text); color: var(--bg); }
+  .srow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .mini-btn { flex: none; height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--text); color: var(--bg); }
   .mini-btn.ghost { background: transparent; color: var(--text-2); border: 1px solid var(--line); }
   :root[data-theme="paper"] .mini-btn { border-radius: 0; }
   .note { font-size: 12px; margin-top: 12px; }
+  .fxhint { font-size: 12px; margin: 8px 0 0; }
 </style>

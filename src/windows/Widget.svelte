@@ -4,6 +4,8 @@
   import { coverUrl } from "../lib/api";
   import { accentFrom } from "../lib/color";
   import { particles } from "../lib/gl/particles";
+  import { scene, vividPalette, SCENE_LIST } from "../lib/gl/scenes";
+  import { shaderPalette } from "../lib/color";
   import { activeIndex, lyricTime } from "../lib/lyrics";
   import Spectrum from "../lib/components/Spectrum.svelte";
   import LiveLine from "../lib/components/LiveLine.svelte";
@@ -38,6 +40,30 @@
     return { update: () => requestAnimationFrame(run) };
   }
   let fx: HTMLCanvasElement | undefined = $state();
+  let sc: HTMLCanvasElement | undefined = $state();
+  const sceneId = $derived(SCENE_LIST.some((x) => x.id === w.scene) ? w.scene : null);
+  const hl = $derived.by(() => {
+    if (w.color !== "cover") return null;
+    const v = vividPalette(t?.palette);
+    return `${Math.round(v[0] * 255)} ${Math.round(v[1] * 255)} ${Math.round(v[2] * 255)}`;
+  });
+
+  // The same spaces as the lyrics view, at low resolution: the widget is small.
+  $effect(() => {
+    const id = sceneId;
+    if (!sc || !id) return;
+    const c = sc;
+    return untrack(() =>
+      scene(c, {
+        id: id as any,
+        palette: () => app.player.track?.palette,
+        auraPalette: () => shaderPalette(app.player.track?.palette, [[40, 40, 60], [80, 50, 70], [30, 50, 70], [70, 40, 50]]),
+        intensity: () => (app.player.playing ? 0.9 : 0.4),
+        speed: () => app.settings?.visual.sceneSpeed ?? 1,
+        low: () => true,
+      }),
+    );
+  });
 
   onMount(() => {
     let raf = 0;
@@ -71,7 +97,7 @@
 
 <div class="wrap" style="--op:{w.opacity};--blur:{w.blur}px;--sc:{w.scale}">
   <div class="card {w.style}" class:ct={w.clickThrough} bind:this={card} data-tauri-drag-region>
-    {#if cover}<img class="bgart" src={cover} alt="" />{/if}
+    {#if sceneId}<canvas class="scene" bind:this={sc}></canvas>{:else if cover}<img class="bgart" src={cover} alt="" />{/if}
     {#if w.particles}<canvas class="fx" bind:this={fx}></canvas>{/if}
     {#if w.spectrum && w.style !== "spectrum"}<div class="specbg"><Spectrum bars={40} gap={2} color="currentColor" /></div>{/if}
 
@@ -84,7 +110,7 @@
     {:else if w.style === "lyrics"}
       {#if cover}<img class="art sm" src={cover} alt="" data-tauri-drag-region />{/if}
       <div class="lyr" data-tauri-drag-region>
-        <LiveLine size={21} fallback={t ? `${t.artist} — ${t.title}` : "oto"} />
+        <LiveLine size={21} fallback={t ? `${t.artist} — ${t.title}` : "oto"} pop={w.lyricsStyle === "edit"} glow={w.textGlow} {hl} />
       </div>
     {:else}
       {#if cover}<img class="art" src={cover} alt="" data-tauri-drag-region />{:else}<div class="art ph" data-tauri-drag-region></div>{/if}
@@ -137,6 +163,7 @@
   }
   .bgart { position: absolute; inset: -30%; width: 160%; height: 160%; object-fit: cover; filter: blur(var(--blur)) saturate(1.6); opacity: calc(var(--op) * 0.55); pointer-events: none; }
   .fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .scene { position: absolute; inset: 0; width: 100%; height: 100%; opacity: var(--op); pointer-events: none; }
   .specbg { position: absolute; left: 0; right: 0; bottom: 0; height: 46%; opacity: 0.16; color: #fff; pointer-events: none; }
   .art { position: relative; width: 76px; height: 76px; border-radius: 14px; object-fit: cover; flex: none; box-shadow: 0 10px 24px -10px rgb(0 0 0 / 0.7); }
   .art.sm { width: 64px; height: 64px; border-radius: 12px; }

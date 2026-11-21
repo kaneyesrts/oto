@@ -116,6 +116,10 @@ export interface WidgetSettings {
   glow: boolean;
   particles: boolean;
   spectrum: boolean;
+  scene: "cover" | SceneId;
+  lyricsStyle: "line" | "edit";
+  textGlow: number;
+  color: "white" | "cover";
   x?: number | null;
   y?: number | null;
 }
@@ -133,6 +137,24 @@ export interface Hotkeys {
   seekBack: string;
 }
 
+export type SceneId = "aura" | "space" | "silk" | "aurora" | "depth" | "smoke" | "void";
+
+export interface LyricsSettings {
+  fontScale: number;
+  depthBlur: boolean;
+  autoAlign: boolean;
+  online: boolean;
+  style: "classic" | "edit";
+  align: "left" | "center";
+  hlSung: boolean;
+  hlChorus: boolean;
+  hlFinale: boolean;
+  glow: number;
+  beat: number;
+  color: "white" | "cover";
+  wordSync?: boolean;
+}
+
 export type ThemeId = "aura" | "noir" | "mist" | "liquid" | "paper";
 
 export interface Settings {
@@ -142,8 +164,8 @@ export interface Settings {
   closeToTray: boolean;
   folders: string[];
   volume: number;
-  lyrics: { fontScale: number; depthBlur: boolean; autoAlign: boolean; online: boolean };
-  visual: { particles: boolean; intensity: number; quality: "low" | "high" };
+  lyrics: LyricsSettings;
+  visual: { particles: boolean; intensity: number; quality: "low" | "high"; scene: SceneId; sceneSpeed: number };
   widget: WidgetSettings;
   hotkeys: Hotkeys;
   audio: AudioSettings;

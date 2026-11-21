@@ -93,7 +93,7 @@
             <div class="big">Всё вперемешку</div>
             <div class="muted">60 из {libraryTracks().length} {plural(libraryTracks().length, "трека", "треков", "треков")} библиотеки</div>
           </div>
-          <div class="stackwrap"><CoverStack covers={coversOf(randomMix)} size={92} /></div>
+          <div class="stackwrap"><CoverStack covers={coversOf(randomMix)} size={78} /></div>
         </button>
       {/if}
       <button class="card mixcard hoverable panel" onclick={() => player.playList(dayMix.map((t) => t.id), 0)} use:glass={{ radius: 30, enabled: liquid }}>
@@ -103,7 +103,7 @@
           <div class="big">Любимое и новое</div>
           <div class="muted">60 треков: избранное, частое и немного забытого</div>
         </div>
-        <div class="stackwrap"><CoverStack covers={coversOf(dayMix)} size={92} /></div>
+        <div class="stackwrap"><CoverStack covers={coversOf(dayMix)} size={78} /></div>
       </button>
     </section>
 
@@ -169,11 +169,12 @@
 
   .hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; align-items: stretch; }
   .hero.compact .card { min-height: 0; }
-  .mixcard { align-items: center; min-height: 168px; }
-  .mixcard .txt { align-self: flex-end; }
+  /* Fan of covers on top, text underneath across the full width: nothing gets squeezed. */
+  .mixcard { flex-direction: column; align-items: stretch; justify-content: space-between; gap: 6px; min-height: 236px; }
+  .mixcard .stackwrap { order: -1; align-self: flex-end; }
   .tint { position: absolute; inset: -30%; background-size: cover; background-position: center; filter: blur(55px) saturate(1.5); opacity: 0.32; pointer-events: none; }
   :root[data-theme="paper"] .tint { display: none; }
-  .stackwrap { position: relative; flex: none; margin-right: -6px; }
+  .stackwrap { position: relative; flex: none; }
   .upnext { min-width: 0; display: flex; flex-direction: column; }
   .un-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; }
   .un { display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: center; padding: 6px; border-radius: 12px; text-align: left; min-width: 0; transition: background 0.15s; }
