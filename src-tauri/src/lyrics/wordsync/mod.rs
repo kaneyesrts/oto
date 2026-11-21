@@ -105,6 +105,9 @@ pub fn wants(doc: &LyricsDoc) -> bool {
 }
 
 /// Aligns `rec` to the doc's text. None when the match is too poor to trust.
+/// How far recognition may move a human-timed line before we distrust it.
+const TRUST_HUMAN_MS: i64 = 1000;
+
 pub fn apply(doc: &LyricsDoc, rec: &[RecWord]) -> Option<(LyricsDoc, f32)> {
     let texts: Vec<String> = doc.lines.iter().map(|l| l.text.clone()).collect();
     let res = align::align(&texts, &priors_for(doc), rec);
@@ -113,11 +116,25 @@ pub fn apply(doc: &LyricsDoc, rec: &[RecWord]) -> Option<(LyricsDoc, f32)> {
         return None;
     }
     let source = if doc.source.is_empty() { "по голосу".to_string() } else { format!("{} · по голосу", doc.source) };
+    let mut lines = res.lines;
+    if doc.kind == "synced" && lines.len() == doc.lines.len() {
+        // Lines already timed by a person are usually right to within a few hundred ms;
+        // recognition adds the words inside them. Where it disagrees with the human line
+        // start by more than a second, recognition most likely misheard that line: keep
+        // the human timing and let the words be spread as before.
+        for (l, o) in lines.iter_mut().zip(&doc.lines) {
+            if !o.text.trim().is_empty() && (l.t as i64 - o.t as i64).abs() > TRUST_HUMAN_MS {
+                l.t = o.t;
+                l.d = o.d;
+                l.words = None;
+            }
+        }
+    }
     Some((
         LyricsDoc {
             kind: "synced".into(),
             source,
-            lines: res.lines,
+            lines,
             auto_shift_ms: 0,
             auto_scale: 1.0,
             user_offset_ms: 0,
@@ -341,6 +358,30 @@ line number 1"));
         assert!(p.starts_with("line number 9
 "), "{p}");
         assert!(p.ends_with("line number 16"), "{p}");
+    }
+
+    #[test]
+    fn human_line_timing_wins_over_a_misheard_line() {
+        let doc = LyricsDoc {
+            kind: "synced".into(),
+            source: "Яндекс Музыка".into(),
+            lines: vec![line(1000, "one two three"), line(10_000, "four five six")],
+            auto_scale: 1.0,
+            ..Default::default()
+        };
+        // First line heard where the human put it; the second one 3 s late.
+        let mut rec = vec![];
+        for (i, w) in ["one", "two", "three"].iter().enumerate() {
+            rec.push(RecWord { t0: 1100 + i as u32 * 400, t1: 1400 + i as u32 * 400, text: w.to_string() });
+        }
+        for (i, w) in ["four", "five", "six"].iter().enumerate() {
+            rec.push(RecWord { t0: 13_000 + i as u32 * 400, t1: 13_300 + i as u32 * 400, text: w.to_string() });
+        }
+        let (r, _) = apply(&doc, &rec).expect("refined");
+        assert!(r.lines[0].words.is_some(), "agreeing line keeps word timing");
+        assert!((r.lines[0].t as i64 - 1000).abs() <= 1000);
+        assert_eq!(r.lines[1].t, 10_000, "human start kept");
+        assert!(r.lines[1].words.is_none());
     }
 
     #[test]
