@@ -68,8 +68,10 @@ whisper-rs-sys = { path = "vendor/whisper-rs-sys" }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
-codegen-units = 1
-lto = true
+# Thin LTO with parallel codegen: builds several times faster than fat LTO with one
+# codegen unit, for a negligible difference in speed and size.
+codegen-units = 16
+lto = "thin"
 opt-level = 3
 panic = "abort"
 strip = true

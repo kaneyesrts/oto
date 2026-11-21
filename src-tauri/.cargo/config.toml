@@ -8,3 +8,10 @@ CMAKE = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Com
 # target/ (MAX_PATH) and Ninja is faster. Also shipped with VS 2022 Build Tools.
 CMAKE_GENERATOR = "Ninja"
 CMAKE_MAKE_PROGRAM = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja\\ninja.exe"
+# Portable CPU code: not "-march=native" for this machine, so the installer runs on any
+# x86-64 CPU with AVX2 (Intel Haswell 2013+, AMD Zen/Excavator+).
+GGML_NATIVE = "OFF"
+GGML_AVX = "ON"
+GGML_AVX2 = "ON"
+GGML_FMA = "ON"
+GGML_F16C = "ON"
