@@ -358,11 +358,17 @@ pub async fn source_search(app: AppHandle, id: String, query: String) -> Result<
 /// `saved` puts them in the library.
 #[tauri::command]
 pub async fn source_store(app: AppHandle, tracks: Vec<Track>, saved: bool) {
+    let mut tracks: Vec<Track> = tracks.into_iter().map(|mut t| { t.saved = saved; t }).collect();
+    // Store and return right away: playback waits on this. Covers are cached afterwards in
+    // the background (dozens of image downloads for a page of search results).
+    let app2 = app.clone();
+    let stored = tracks.clone();
     let _ = tauri::async_runtime::spawn_blocking(move || {
-        let mut tracks: Vec<Track> = tracks.into_iter().map(|mut t| { t.saved = saved; t }).collect();
-        // Store immediately (playback can start), then cache covers and store again.
-        app.state::<Db>().upsert_remote(&tracks);
-        let _ = app.emit("oto://library", ());
+        app2.state::<Db>().upsert_remote(&stored);
+        let _ = app2.emit("oto://library", ());
+    })
+    .await;
+    std::thread::spawn(move || {
         let dir = app.state::<crate::AppState>().cover_dir.clone();
         cache_covers(&dir, &mut tracks);
         app.state::<Db>().upsert_remote(&tracks);
@@ -371,8 +377,7 @@ pub async fn source_store(app: AppHandle, tracks: Vec<Track>, saved: bool) {
         if let Some(cur) = audio.snapshot().track {
             audio.send(crate::audio::Cmd::RefreshTrack(cur.id));
         }
-    })
-    .await;
+    });
 }
 
 #[tauri::command]

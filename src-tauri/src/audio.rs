@@ -37,6 +37,33 @@ pub enum Cmd {
     QueueMove { from: usize, to: usize },
     QueueClear,
     Audio(crate::settings::AudioSettings),
+    /// A track finished opening on a worker thread (`ticket` tells stale results apart).
+    Opened { ticket: u64, result: Result<OpenedSrc, String> },
+    /// The next track in the queue, opened ahead of time.
+    Preopened { id: String, result: Result<OpenedSrc, String> },
+}
+
+/// A decoder ready to play, opened off the engine thread.
+pub struct OpenedSrc {
+    source: Box<dyn Source + Send>,
+    codec: String,
+    rate: u32,
+}
+
+impl std::fmt::Debug for OpenedSrc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "OpenedSrc({} {})", self.codec, self.rate)
+    }
+}
+
+/// A track being opened in the background; what the listener did meanwhile is kept here.
+struct Pending {
+    ticket: u64,
+    index: usize,
+    track_id: String,
+    autoplay: bool,
+    seek: Option<u64>,
+    depth: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -81,6 +108,8 @@ struct Prepared {
     index: usize,
     track: Track,
     sample_rate: u32,
+    /// Codec and source rate of the appended track (for the format label).
+    format: Option<(String, u32)>,
 }
 
 impl Audio {
@@ -191,6 +220,14 @@ struct Engine {
     fading_out: Option<(Player, Instant)>,
     /// When the current player's fade-in started (crossfade).
     fading_in: Option<Instant>,
+    /// Sends worker results back to this engine.
+    tx: Sender<Cmd>,
+    load_gen: u64,
+    pending: Option<Pending>,
+    /// Next queue track opened ahead of time, and which one is being opened.
+    preopened: Option<(String, OpenedSrc)>,
+    preopen_inflight: Option<String>,
+    preopen_tried: Option<String>,
     // play accounting
     started_at: i64,
     listened_ms: u64,
@@ -204,6 +241,7 @@ pub fn start(app: AppHandle, volume: f32) -> Audio {
 
     {
         let (app, state, ring) = (app.clone(), state.clone(), ring.clone());
+        let engine_tx = tx.clone();
         std::thread::Builder::new()
             .name("oto-audio".into())
             .spawn(move || {
@@ -213,6 +251,12 @@ pub fn start(app: AppHandle, volume: f32) -> Audio {
                     return;
                 };
                 let mut eng = Engine {
+                    tx: engine_tx,
+                    load_gen: 0,
+                    pending: None,
+                    preopened: None,
+                    preopen_inflight: None,
+                    preopen_tried: None,
                     app,
                     state,
                     ring,
@@ -271,6 +315,8 @@ impl Engine {
             self.load(idx, playing);
             if let Some(p) = &self.player {
                 let _ = p.try_seek(Duration::from_millis(pos));
+            } else if let Some(p) = &mut self.pending {
+                p.seek = Some(pos);
             }
             self.state.write().pos_ms = pos;
             self.listened_ms = listened;
@@ -319,6 +365,9 @@ impl Engine {
             let prep = self.prepared.take().unwrap();
             self.account(false);
             self.ring.sr.store(prep.sample_rate, Ordering::Relaxed);
+            if let Some((codec, rate)) = &prep.format {
+                self.set_format(codec, *rate);
+            }
             {
                 let mut s = self.state.write();
                 s.duration_ms = prep.track.duration_ms;
@@ -345,6 +394,7 @@ impl Engine {
             return;
         }
         if playing {
+            self.maybe_preopen(pos);
             self.maybe_prepare_next(pos);
         }
     }
@@ -395,14 +445,26 @@ impl Engine {
             let Some(track) = id.and_then(|id| self.db().track(&id)) else { return };
             // Only local files: opening a network stream here could stall the audio thread
             // past the end of the current track. Remote tracks take the regular path.
+            let sample_rate = self.sink.config().sample_rate().get();
             if track.source != "local" {
+                // A stream opened ahead of time can be appended just like a file.
+                if self.preopened.as_ref().is_some_and(|(id, _)| *id == track.id) && self.player.is_some() {
+                    let (_, o) = self.preopened.take().unwrap();
+                    let format = Some((o.codec.clone(), o.rate));
+                    let chained = self.chain(o.source);
+                    if let Some(p) = &self.player {
+                        p.append(chained);
+                    }
+                    self.prepared = Some(Prepared { index: next, track, sample_rate, format });
+                }
                 return;
             }
             let Ok(dec) = File::open(&track.path).map_err(anyhow::Error::from).and_then(|f| Ok(rodio::Decoder::try_from(f)?)) else { return };
-            let sample_rate = self.sink.config().sample_rate().get();
+            let ext = std::path::Path::new(&track.path).extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
+            let format = Some((ext, dec.sample_rate().get()));
             if let Some(p) = &self.player {
                 p.append(self.chain(dec));
-                self.prepared = Some(Prepared { index: next, track, sample_rate });
+                self.prepared = Some(Prepared { index: next, track, sample_rate, format });
             }
         }
     }
@@ -474,7 +536,11 @@ impl Engine {
         self.player = None; // dropping the old player stops it immediately
         self.prepared = None;
         self.fading_in = None;
-        self.app.state::<crate::sources::Sources>().spotify().stop();
+        self.load_gen += 1;
+        self.pending = None;
+        if track.source != "spotify" {
+            self.app.state::<crate::sources::Sources>().spotify().stop();
+        }
 
         // Show the new track right away (cover, title) even if the network takes a moment.
         {
@@ -483,79 +549,140 @@ impl Engine {
             s.track = Some(track.clone());
             s.index = index;
             s.pos_ms = 0;
-            s.playing = false;
-            s.buffering = track.source != "local";
-        }
-        if track.source != "local" {
-            self.emit();
+            s.playing = autoplay;
+            s.buffering = false;
         }
 
-        // The requested copy first, then other copies of the same recording
-        // (a local file for a Yandex track, SoundCloud for a missing file, …).
-        let mut candidates = vec![track.clone()];
-        candidates.extend(self.db().alternates(&track));
-        let mut last_err = String::new();
-        let mut opened = false;
-        for cand in &candidates {
-            match self.open_source(cand, autoplay) {
-                Ok(()) => {
-                    opened = true;
-                    break;
-                }
-                Err(e) => last_err = e.to_string(),
-            }
-        }
-        self.state.write().buffering = false;
-        if opened {
-            self.started_at = now_ms();
-            self.state.write().playing = autoplay;
+        // Opened ahead of time while the previous track played: starts instantly.
+        if self.preopened.as_ref().is_some_and(|(pid, _)| *pid == track.id) {
+            let (_, o) = self.preopened.take().unwrap();
+            self.apply_opened(o, autoplay);
             return;
         }
-        let _ = self.app.emit("oto://error", format!("Не удалось открыть «{}»: {last_err}", track.title));
-        let len = self.state.read().queue.len();
-        if index + 1 < len && depth < 5 {
-            self.load_inner(index + 1, autoplay, depth + 1);
+        // Local files open in milliseconds; do it here.
+        if track.source == "local" {
+            if let Ok(o) = open_track(&self.app, &track) {
+                self.apply_opened(o, autoplay);
+                return;
+            }
+        }
+
+        // Network: open on a worker so play/pause/seek/skip stay instant meanwhile.
+        let ticket = self.load_gen;
+        self.pending = Some(Pending { ticket, index, track_id: track.id.clone(), autoplay, seek: None, depth });
+        self.state.write().buffering = true;
+        self.emit();
+        if self.preopen_inflight.as_deref() == Some(track.id.as_str()) {
+            return; // already being opened; its result arrives as `Preopened`
+        }
+        self.spawn_open(ticket, track);
+    }
+
+    /// Opens the track (then other copies of the same recording) on a worker thread.
+    fn spawn_open(&self, ticket: u64, track: Track) {
+        let mut candidates = vec![track.clone()];
+        candidates.extend(self.db().alternates(&track));
+        let (app, tx) = (self.app.clone(), self.tx.clone());
+        let _ = std::thread::Builder::new().name("oto-open".into()).spawn(move || {
+            let mut last = String::new();
+            for c in &candidates {
+                match open_track(&app, c) {
+                    Ok(o) => {
+                        let _ = tx.send(Cmd::Opened { ticket, result: Ok(o) });
+                        return;
+                    }
+                    Err(e) => last = e.to_string(),
+                }
+            }
+            let _ = tx.send(Cmd::Opened { ticket, result: Err(last) });
+        });
+    }
+
+    fn apply_opened(&mut self, o: OpenedSrc, autoplay: bool) {
+        self.set_format(&o.codec, o.rate);
+        self.start(o.source, autoplay);
+        if self.fading_in.is_some() {
+            // Crossfade: the new track was still opening when the fade began.
+            if let Some(p) = &self.player {
+                p.set_volume(0.0);
+            }
+            self.fading_in = Some(Instant::now());
+        }
+        self.started_at = now_ms();
+        let mut s = self.state.write();
+        s.buffering = false;
+        s.playing = autoplay;
+    }
+
+    fn on_opened(&mut self, ticket: u64, result: Result<OpenedSrc, String>) {
+        let Some(p) = self.pending.take_if(|p| p.ticket == ticket) else { return }; // stale: dropped
+        match result {
+            Ok(o) => {
+                self.apply_opened(o, p.autoplay);
+                if let (Some(ms), Some(pl)) = (p.seek, &self.player) {
+                    let _ = pl.try_seek(Duration::from_millis(ms));
+                    self.state.write().pos_ms = ms;
+                }
+            }
+            Err(e) => {
+                self.state.write().buffering = false;
+                let title = self.state.read().track.as_ref().map(|t| t.title.clone()).unwrap_or_default();
+                let _ = self.app.emit("oto://error", format!("Не удалось открыть «{title}»: {e}"));
+                let len = self.state.read().queue.len();
+                if p.index + 1 < len && p.depth < 5 {
+                    self.load_inner(p.index + 1, p.autoplay, p.depth + 1);
+                }
+            }
         }
     }
 
-    /// Opens one copy of a track (file or network) and starts it on a fresh player.
-    fn open_source(&mut self, t: &Track, autoplay: bool) -> anyhow::Result<()> {
-        if t.source == "local" {
-            let dec = rodio::Decoder::try_from(File::open(&t.path)?)?;
-            let ext = std::path::Path::new(&t.path).extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
-            self.set_format(&ext, dec.sample_rate().get());
-            self.start(dec, autoplay);
-            return Ok(());
+    fn on_preopened(&mut self, id: String, result: Result<OpenedSrc, String>) {
+        if self.preopen_inflight.as_deref() == Some(id.as_str()) {
+            self.preopen_inflight = None;
         }
-        let src = crate::sources::stream_for(&self.app, t)?;
-        if let crate::providers::StreamSource::Spotify { uri } = &src {
-            let backend = self.app.state::<crate::sources::Sources>().spotify().backend()?;
-            backend.play(uri, 0)?;
-            backend.wait_started(Duration::from_secs(12))?;
-            let source = crate::providers::spotify::SpotifySource { backend, duration: Duration::from_millis(t.duration_ms) };
-            self.set_format("OGG 320", 44_100);
-            self.start(source, autoplay);
-            return Ok(());
+        let waiting = self.pending.as_ref().filter(|p| p.track_id == id).map(|p| p.ticket);
+        match (result, waiting) {
+            (Ok(o), Some(ticket)) => self.on_opened(ticket, Ok(o)),
+            (Ok(o), None) => {
+                let next_id = self.next_index().and_then(|i| self.state.read().queue.get(i).cloned());
+                if next_id.as_deref() == Some(id.as_str()) {
+                    self.preopened = Some((id, o));
+                }
+            }
+            // The early open failed and the listener is now waiting for it: the regular
+            // path (with alternate copies).
+            (Err(_), Some(ticket)) => {
+                if let Some(track) = self.state.read().track.clone() {
+                    self.spawn_open(ticket, track);
+                }
+            }
+            (Err(_), None) => {}
         }
-        let opened = crate::stream::open(src)?;
-        let mut b = rodio::Decoder::builder().with_data(opened.reader).with_seekable(true).with_coarse_seek(true);
-        if let Some(len) = opened.byte_len {
-            b = b.with_byte_len(len);
+    }
+
+    /// A few seconds into a track, open the next streaming track so skipping to it (or the
+    /// track ending) starts it instantly.
+    fn maybe_preopen(&mut self, pos: u64) {
+        if pos < 4000 || self.preopen_inflight.is_some() || self.pending.is_some() {
+            return;
         }
-        if let Some(m) = opened.mime.as_deref() {
-            b = b.with_mime_type(m);
+        let Some(next) = self.next_index() else { return };
+        let Some(id) = self.state.read().queue.get(next).cloned() else { return };
+        if self.preopened.as_ref().is_some_and(|(p, _)| *p == id) || self.preopen_tried.as_deref() == Some(id.as_str()) {
+            return;
         }
-        let dec = b.build()?;
-        let codec = match opened.mime.as_deref().unwrap_or("") {
-            m if m.contains("flac") => "FLAC",
-            m if m.contains("mpeg") => "MP3",
-            m if m.contains("aac") || m.contains("mp4") => "AAC",
-            m if m.contains("ogg") || m.contains("opus") => "OGG",
-            _ => "",
-        };
-        self.set_format(codec, dec.sample_rate().get());
-        self.start(dec, autoplay);
-        Ok(())
+        let Some(track) = self.db().track(&id) else { return };
+        if track.source == "local" || track.source == "spotify" || self.state.read().track.as_ref().is_some_and(|t| t.id == id) {
+            return;
+        }
+        self.preopened = None;
+        self.preopen_inflight = Some(id.clone());
+        self.preopen_tried = Some(id.clone());
+        let (app, tx) = (self.app.clone(), self.tx.clone());
+        let _ = std::thread::Builder::new().name("oto-preopen".into()).spawn(move || {
+            let result = open_track(&app, &track).map_err(|e| e.to_string());
+            let _ = tx.send(Cmd::Preopened { id, result });
+        });
     }
 
     fn set_format(&self, codec: &str, rate: u32) {
@@ -631,6 +758,9 @@ impl Engine {
                 if let Some(p) = &self.player {
                     p.play();
                     self.state.write().playing = true;
+                } else if let Some(p) = &mut self.pending {
+                    p.autoplay = true;
+                    self.state.write().playing = true;
                 }
             }
             Cmd::Pause => {
@@ -638,8 +768,13 @@ impl Engine {
                 if let Some(p) = &self.player {
                     p.pause();
                     self.state.write().playing = false;
+                } else if let Some(p) = &mut self.pending {
+                    p.autoplay = false;
+                    self.state.write().playing = false;
                 }
             }
+            Cmd::Opened { ticket, result } => self.on_opened(ticket, result),
+            Cmd::Preopened { id, result } => self.on_preopened(id, result),
             Cmd::Next => {
                 self.fading_out = None;
                 self.account(true);
@@ -668,6 +803,9 @@ impl Engine {
             Cmd::Seek(ms) => {
                 if let Some(p) = &self.player {
                     let _ = p.try_seek(Duration::from_millis(ms));
+                    self.state.write().pos_ms = ms;
+                } else if let Some(p) = &mut self.pending {
+                    p.seek = Some(ms);
                     self.state.write().pos_ms = ms;
                 }
             }
@@ -1012,4 +1150,41 @@ mod seek_probe {
         let r = player.try_seek(Duration::from_secs(30));
         println!("paused seek {:?} pos {:?}", r, player.get_pos());
     }
+}
+
+/// Opens one copy of a track (file, Spotify session or network stream) into a decoder.
+/// Runs on worker threads: network round-trips never block the engine.
+fn open_track(app: &AppHandle, t: &Track) -> anyhow::Result<OpenedSrc> {
+    if t.source == "local" {
+        let dec = rodio::Decoder::try_from(File::open(&t.path)?)?;
+        let ext = std::path::Path::new(&t.path).extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
+        let rate = dec.sample_rate().get();
+        return Ok(OpenedSrc { source: Box::new(dec), codec: ext, rate });
+    }
+    let src = crate::sources::stream_for(app, t)?;
+    if let crate::providers::StreamSource::Spotify { uri } = &src {
+        let backend = app.state::<crate::sources::Sources>().spotify().backend()?;
+        backend.play(uri, 0)?;
+        backend.wait_started(Duration::from_secs(12))?;
+        let source = crate::providers::spotify::SpotifySource { backend, duration: Duration::from_millis(t.duration_ms) };
+        return Ok(OpenedSrc { source: Box::new(source), codec: "OGG 320".into(), rate: 44_100 });
+    }
+    let opened = crate::stream::open(src)?;
+    let mut b = rodio::Decoder::builder().with_data(opened.reader).with_seekable(true).with_coarse_seek(true);
+    if let Some(len) = opened.byte_len {
+        b = b.with_byte_len(len);
+    }
+    if let Some(m) = opened.mime.as_deref() {
+        b = b.with_mime_type(m);
+    }
+    let dec = b.build()?;
+    let codec = match opened.mime.as_deref().unwrap_or("") {
+        m if m.contains("flac") => "FLAC",
+        m if m.contains("mpeg") => "MP3",
+        m if m.contains("aac") || m.contains("mp4") => "AAC",
+        m if m.contains("ogg") || m.contains("opus") => "OGG",
+        _ => "",
+    };
+    let rate = dec.sample_rate().get();
+    Ok(OpenedSrc { source: Box::new(dec), codec: codec.into(), rate })
 }
