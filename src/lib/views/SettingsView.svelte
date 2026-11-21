@@ -4,6 +4,7 @@
   import { api, type Hotkeys, type Settings, type ThemeId, type WordSyncStatus } from "../api";
   import { FolderPlus, Refresh, X } from "../icons";
   import Equalizer from "../components/Equalizer.svelte";
+  import SpotifySetup from "../components/SpotifySetup.svelte";
 
   const s = $derived(app.settings!);
 
@@ -18,20 +19,7 @@
   const set = (f: (x: Settings) => void) => saveSettings(f);
 
   // Spotify: optional own app (its own rate limit instead of librespot's shared one).
-  let spClient = $state("");
-  let spClientErr = $state("");
-  let spOpen = $state(false);
-  $effect(() => { spClient = app.sources.find((x) => x.id === "spotify")?.clientId ?? ""; });
-  async function saveSpClient() {
-    spClientErr = "";
-    try {
-      await api.sourceSetSpotifyClient(spClient);
-      await refreshSources();
-      spOpen = false;
-    } catch (e) {
-      spClientErr = String(e);
-    }
-  }
+  let spGuide = $state(false);
 
   // Word-exact lyrics: needs a one-time speech model download.
   let ws = $state<WordSyncStatus | null>(null);
@@ -244,19 +232,7 @@
             <div class="srow"><button class="mini-btn" onclick={() => api.sourceLogin(src.id)}>Войти</button></div>
           {/if}
           {#if src.id === "spotify"}
-            {#if spOpen}
-              <div class="spc">
-                <input class="spin num" placeholder="Client ID своего приложения" bind:value={spClient} spellcheck="false" onkeydown={(e) => e.key === "Enter" && saveSpClient()} />
-                <div class="srow">
-                  <button class="mini-btn" onclick={saveSpClient}>Сохранить</button>
-                  <button class="mini-btn ghost" onclick={() => (spOpen = false)}>Отмена</button>
-                </div>
-                {#if spClientErr}<span class="err">{spClientErr}</span>{/if}
-                <span class="faint tiny">Своё приложение на developer.spotify.com даёт свой лимит запросов. Redirect URI: <span class="num">http://127.0.0.1:8898/login</span>. После смены нужно войти заново.</span>
-              </div>
-            {:else}
-              <button class="link faint tiny" onclick={() => (spOpen = true)}>{src.clientId ? "Своё приложение подключено · изменить" : "Своё приложение Spotify (Client ID)"}</button>
-            {/if}
+            <button class="link faint tiny" onclick={() => (spGuide = true)}>{src.clientId ? "Своё приложение подключено · настроить" : "Как подключить Spotify (свой ключ)"}</button>
           {/if}
         </div>
       {/each}
@@ -264,6 +240,8 @@
     <p class="faint note">API Яндекс Музыки и SoundCloud неофициальные и могут меняться. Токены хранятся только на этом компьютере.</p>
   </section>
 </div>
+
+{#if spGuide}<SpotifySetup onclose={() => (spGuide = false)} />{/if}
 
 <style>
   .settings { height: 100%; overflow-y: auto; padding: 28px 32px 60px; max-width: 920px; }
@@ -316,10 +294,7 @@
   .mini-btn.ghost { background: transparent; color: var(--text-2); border: 1px solid var(--line); }
   :root[data-theme="paper"] .mini-btn { border-radius: 0; }
   .note { font-size: 12px; margin-top: 12px; }
-  .spc { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-  .spin { height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font-size: 12px; min-width: 0; }
   .tiny { font-size: 11.5px; line-height: 1.35; }
-  .err { font-size: 11.5px; color: #ff7a7a; }
   .fxhint { font-size: 12px; margin: 8px 0 0; }
   .dl { display: block; height: 4px; border-radius: 4px; margin: 8px 0 4px; max-width: 320px; background: color-mix(in srgb, var(--text) 12%, transparent); overflow: hidden; }
   .dl i { display: block; height: 100%; background: var(--accent); transform-origin: left; transition: transform 0.3s; }
