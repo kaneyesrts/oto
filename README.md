@@ -15,6 +15,7 @@
   <img src="https://img.shields.io/badge/Rust-Tauri%202-0b0a0f?style=flat-square&logo=rust&logoColor=white" alt="Rust · Tauri 2">
   <img src="https://img.shields.io/badge/Svelte-5-0b0a0f?style=flat-square&logo=svelte&logoColor=white" alt="Svelte 5">
   <img src="https://img.shields.io/badge/WebGL2-шейдеры-0b0a0f?style=flat-square&logo=webgl&logoColor=white" alt="WebGL2">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/лицензия-MIT-0b0a0f?style=flat-square" alt="MIT"></a>
 </p>
 
 <br>
@@ -191,6 +192,10 @@ src/
 `scripts/` выполняют JS, кликают и снимают скриншоты окон приложения через DevTools
 (`cdp.mjs`, `cdp-click.mjs`, `cdp-drag.mjs`, `cdp-shot.mjs`).
 </details>
+
+## Лицензия
+
+[MIT](LICENSE) © kaneyesrts. Встроенный [whisper.cpp](src-tauri/vendor/whisper-rs-sys/whisper.cpp/LICENSE) распространяется под своей лицензией MIT.
 
 ---
 
