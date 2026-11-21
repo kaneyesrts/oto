@@ -10,6 +10,7 @@
   import { activeIndex, lyricTime, wordsOf, sourceLabel, lineRoles } from "../lyrics";
   import Seek from "./Seek.svelte";
   import LyricsFx from "./LyricsFx.svelte";
+  import Volume from "./Volume.svelte";
   import { Play, Pause, SkipBack, SkipForward, Heart, ChevronLeft, Refresh, Minimize, Maximize, Sparkles } from "../icons";
 
   const t = $derived(app.player.track);
@@ -274,6 +275,7 @@
           {#if app.player.playing}<Pause size={24} fill="currentColor" strokeWidth={0} />{:else}<Play size={24} fill="currentColor" strokeWidth={0} />{/if}
         </button>
         <button class="icon-btn big" onclick={player.next} aria-label="Вперёд"><SkipForward size={22} fill="currentColor" /></button>
+        <Volume compact={edit} width={edit ? 72 : 86} />
         <div class="offset" title="Сдвиг текста (сохраняется для трека)">
           <button onclick={() => nudge(-250)} aria-label="Текст позже">−</button>
           <span class="num">{((doc?.userOffsetMs ?? 0) / 1000).toFixed(2)}</span>
@@ -398,7 +400,8 @@
   .left :global(.seek .t) { color: inherit; opacity: 0.5; }
   .left :global(.rail) { background: rgb(127 127 127 / 0.28) !important; }
   .left :global(.fill) { background: currentColor !important; }
-  .ctl { display: flex; align-items: center; gap: 10px; }
+  /* Wraps rather than spilling out of the column in a narrow window. */
+  .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
   .ctl .icon-btn { color: inherit; opacity: 0.75; }
   .ctl .icon-btn:hover { opacity: 1; background: rgb(127 127 127 / 0.15); }
   .ctl .icon-btn.on { color: var(--accent); opacity: 1; }

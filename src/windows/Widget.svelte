@@ -9,6 +9,7 @@
   import { activeIndex, lyricTime } from "../lib/lyrics";
   import Spectrum from "../lib/components/Spectrum.svelte";
   import LiveLine from "../lib/components/LiveLine.svelte";
+  import Volume from "../lib/components/Volume.svelte";
   import { Play, Pause, SkipBack, SkipForward, Heart, MousePointer } from "../lib/icons";
 
   const w = $derived(app.settings!.widget);
@@ -96,7 +97,7 @@
 </script>
 
 <div class="wrap" style="--op:{w.opacity};--blur:{w.blur}px;--sc:{w.scale}">
-  <div class="card {w.style}" class:ct={w.clickThrough} bind:this={card} data-tauri-drag-region>
+  <div class="card {w.style}" class:ct={w.clickThrough} bind:this={card} data-tauri-drag-region role="group" aria-label="Мини-плеер" onwheel={(e) => { e.preventDefault(); player.volume(Math.min(1, Math.max(0, app.player.volume - Math.sign(e.deltaY) * 0.04))); }}>
     {#if sceneId}<canvas class="scene" bind:this={sc}></canvas>{:else if cover}<img class="bgart" src={cover} alt="" />{/if}
     {#if w.particles}<canvas class="fx" bind:this={fx}></canvas>{/if}
     {#if w.spectrum && w.style !== "spectrum"}<div class="specbg"><Spectrum bars={40} gap={2} color="currentColor" /></div>{/if}
@@ -132,6 +133,7 @@
           {#if app.player.playing}<Pause size={16} fill="currentColor" strokeWidth={0} />{:else}<Play size={16} fill="currentColor" strokeWidth={0} />{/if}
         </button>
         <button onclick={player.next} aria-label="Вперёд"><SkipForward size={16} fill="currentColor" /></button>
+        <Volume size={15} compact width={64} />
       </div>
     {/if}
     {#if w.clickThrough}<span class="ctbadge" title="Сквозь клики"><MousePointer size={11} /></span>{/if}

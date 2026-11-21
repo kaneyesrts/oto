@@ -68,7 +68,7 @@
   {/if}
 
   <div class="foot">
-    {#if app.scan}
+    {#if app.scan && app.scan.total > 0 && !(app.scan.finished && app.scan.done === 0)}
       <div class="scan">
         <div class="eyebrow">Сканирование</div>
         <div class="bar"><i style="width:{app.scan.total ? (app.scan.done / app.scan.total) * 100 : 0}%"></i></div>

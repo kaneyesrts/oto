@@ -80,12 +80,32 @@ impl Spotify {
         Ok(tok.access_token)
     }
 
+    /// GET with Spotify's rate limit honoured: a short `Retry-After` is waited out and the
+    /// request repeated; a long one becomes a readable error instead of a bare "HTTP 429".
     fn get(&self, url: &str) -> anyhow::Result<Value> {
-        let r = self.http.get(url).bearer_auth(self.token()?).send()?;
-        if !r.status().is_success() {
+        let mut attempt = 0;
+        loop {
+            let r = self.http.get(url).bearer_auth(self.token()?).send()?;
+            let status = r.status().as_u16();
+            if r.status().is_success() {
+                return Ok(r.json()?);
+            }
+            attempt += 1;
+            if status == 429 {
+                let wait = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(5);
+                if wait <= 30 && attempt <= 6 {
+                    std::thread::sleep(Duration::from_secs(wait.max(1)));
+                    continue;
+                }
+                let mins = wait.div_ceil(60).max(1);
+                anyhow::bail!("Spotify временно ограничил запросы, попробуй примерно через {mins} мин");
+            }
+            if status >= 500 && attempt <= 2 {
+                std::thread::sleep(Duration::from_millis(800));
+                continue;
+            }
             anyhow::bail!("Spotify API: HTTP {}", r.status());
         }
-        Ok(r.json()?)
     }
 
     pub fn account_name(&self) -> anyhow::Result<String> {
@@ -184,6 +204,8 @@ impl Provider for Spotify {
                 Some(n) => url = n.to_string(),
                 None => break,
             }
+            // Gentle pacing: a big library is many pages, and Spotify throttles bursts.
+            std::thread::sleep(Duration::from_millis(300));
         }
         Ok(out)
     }
@@ -433,5 +455,23 @@ mod tests {
         let s = Spotify::new(None);
         assert_eq!(s.stream("abc").unwrap(), StreamSource::Spotify { uri: "spotify:track:abc".into() });
         assert!(!s.authorized());
+    }
+}
+
+#[cfg(test)]
+mod net_tests {
+    /// What Spotify answers this account right now (rate limit and how long to wait).
+    #[test]
+    #[ignore = "network + local account"]
+    fn net_spotify_rate() {
+        let creds = std::fs::read_to_string(std::env::var("APPDATA").unwrap() + "/app.oto.player/credentials.json").unwrap();
+        let Some(refresh) = serde_json::from_str::<serde_json::Value>(&creds).unwrap()["spotify_refresh"].as_str().map(String::from) else {
+            println!("not logged in to Spotify");
+            return;
+        };
+        let sp = super::Spotify::new(Some(refresh));
+        let tok = sp.token().expect("token");
+        let r = sp.http.get(format!("{}/me/tracks?limit=1", super::API)).bearer_auth(tok).send().unwrap();
+        println!("status {} retry-after {:?}", r.status(), r.headers().get("retry-after"));
     }
 }
